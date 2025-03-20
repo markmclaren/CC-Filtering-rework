@@ -2,6 +2,8 @@
 
 A tool for processing and filtering Common Crawl data using Slurm-based parallel processing.
 
+Derived from original work here: [CC-Filtering](https://github.com/0emerald/CC-Filtering)
+
 ## Overview
 
 This repository contains scripts for efficiently downloading and processing Common Crawl data using a Slurm computing cluster. The workflow automatically creates and submits batch jobs for each crawl date, allowing for parallel processing of multiple crawl segments.
