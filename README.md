@@ -23,6 +23,11 @@ This repository contains scripts for efficiently downloading and processing Comm
 - **run-ultra-parallel.sh** - Maximum throughput configuration with 100 concurrent array tasks  
 - **test-config.sh** - Dry-run validation script to test configurations without submitting jobs
 
+### Monitoring Scripts
+- **job-status.sh** - Comprehensive SLURM job status monitoring with progress tracking and estimates
+- **file-analysis.sh** - Detailed analysis of generated output files, sizes, and storage usage
+- **file-summary.sh** - Quick summary of key output metrics and recent file activity
+
 ## Data Files
 
 - **BristolPostcodeLookup.parquet** - Lookup table for Bristol postcodes used in data filtering
@@ -48,6 +53,32 @@ sbatch run-ultra-parallel.sh
 # Test configuration without submitting jobs
 ./test-config.sh
 ```
+
+### Monitoring and Management
+
+Track your job progress and output files with built-in monitoring tools:
+
+```bash
+# Check job status and progress
+./job-status.sh
+
+# Analyze output files and storage usage
+./file-analysis.sh
+
+# Quick summary of key metrics
+./file-summary.sh
+
+# Combined monitoring
+./job-status.sh && echo "" && ./file-summary.sh
+```
+
+**Monitoring Features:**
+- 📊 **Real-time progress tracking** with completion percentages
+- 🚀 **Performance metrics** including task completion rates
+- 🖥️ **Resource utilization** across compute nodes
+- ⏰ **Estimated completion times** based on current throughput
+- 📁 **File generation analysis** with sizes and recent activity
+- 💾 **Storage monitoring** to track disk usage
 
 ### Performance Optimization Features
 
