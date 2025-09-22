@@ -66,7 +66,7 @@ sbatch run-ultra-parallel.sh
 
 ### Workflow Explanation
 
-1. **job-runner.sh** configures the Micromamba environment and calls `slurm-sequential-runner.py`
+1. **job-runner.sh** configures the Miniconda environment and calls `slurm-sequential-runner.py`
 2. **slurm-sequential-runner.py** reads crawl dates from `crawl_data.txt` and creates a Slurm job for each date
 3. Each job uses **job-template.sh** to configure the environment and run **common-crawl-processor.py**
 4. **common-crawl-processor.py** downloads and processes the Common Crawl data for its assigned date
@@ -76,6 +76,8 @@ sbatch run-ultra-parallel.sh
 - Slurm cluster access
 - Miniconda environment (configured in the scripts)
 - Python 3.x with required packages (listed in environment setup)
+
+**Note**: The project has migrated from Micromamba to Miniconda3 due to segmentation fault issues encountered with Micromamba in the HPC environment. All scripts now use the more stable Miniconda3 installation.
 
 ## Configuration
 
@@ -248,6 +250,12 @@ By following these practices, you'll create a more efficient, maintainable, and 
 - **Cause**: Git LFS not installed but repository configured for it
 - **Solution**: Add miniconda git to PATH: `export PATH="./miniconda3/bin:$PATH"`
 
+**Micromamba segmentation faults:**
+- **Cause**: Micromamba instability in HPC environments
+- **Solution**: Use Miniconda3 instead - more stable and reliable for cluster computing
+- **Migration**: Update scripts to use `./miniconda3/bin/python` instead of micromamba commands
+- **Solution**: Add miniconda git to PATH: `export PATH="./miniconda3/bin:$PATH"`
+
 **Array jobs not starting:**
 - **Cause**: JobArrayTaskLimit reached
 - **Solution**: This is normal - SLURM queues tasks and starts them as resources become available
@@ -267,3 +275,59 @@ sinfo -p compute
 # View detailed job information
 scontrol show job JOBID
 ```
+
+## Git LFS Setup and Data Download
+
+This repository uses Git LFS (Large File Storage) for managing large data files like parquet files and datasets.
+
+### Installing Git LFS
+
+If you don't have Git LFS installed, you can use the version included with Miniconda3:
+
+```bash
+# Add miniconda3 git (includes LFS support) to your PATH
+export PATH="./miniconda3/bin:$PATH"
+
+# Or install git-lfs separately if needed
+# conda install git-lfs
+# git lfs install
+```
+
+### Downloading LFS Content
+
+After cloning the repository, download the large files:
+
+```bash
+# Download all LFS files
+git lfs pull
+
+# Or download specific files
+git lfs pull --include="*.parquet"
+git lfs pull --include="wet.paths"
+```
+
+### Checking LFS Status
+
+```bash
+# View which files are stored in LFS
+git lfs ls-files
+
+# Check LFS tracking patterns
+git lfs track
+
+# View LFS file info
+git lfs pointer --file=BristolPostcodeLookup.parquet
+```
+
+### Working with LFS Files
+
+When you modify large data files, Git LFS automatically handles them:
+
+```bash
+# Add and commit LFS files normally
+git add BristolPostcodeLookup.parquet
+git commit -m "Update lookup data"
+git push
+```
+
+**Note**: Large files (>100MB) are automatically tracked by LFS. The `.gitattributes` file defines which file types use LFS storage.
