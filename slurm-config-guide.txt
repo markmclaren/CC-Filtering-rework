@@ -1,0 +1,23 @@
+# Configuration options for different job durations
+
+# For 1-7 day jobs (most flexible):
+# --partition compute --time 168  # 7 days
+
+# For very long jobs (7-14 days):
+# --partition compute --time 336  # 14 days (maximum for compute partition)
+
+# For shorter test jobs (up to 3 days):
+# --partition short --time 72     # 3 days
+
+# For experimental jobs (1 hour max):
+# --partition test --time 1       # 1 hour
+
+# Memory recommendations based on your data size:
+# Small datasets:  --mem 1G
+# Medium datasets: --mem 2G
+# Large datasets:  --mem 4G
+
+# CPU recommendations:
+# I/O bound tasks: --cpus 1-2
+# CPU intensive:   --cpus 2-4
+# Mixed workload:  --cpus 2 (recommended)
