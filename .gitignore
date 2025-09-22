@@ -1,0 +1,11 @@
+*.err
+*.out
+*.log
+runme.sh
+tmp/
+output/
+202104/
+202104-output/
+.conda_env/
+miniconda3/
+generated_scripts/

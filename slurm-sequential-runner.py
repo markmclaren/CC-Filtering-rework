@@ -23,7 +23,7 @@ def create_template_command(template_content, variables):
 
 def submit_and_wait_for_job(date, n_files, template_content, job_name_prefix="batch_job",
                           partition=None, time_limit=None, mem=None, cpus_per_task=None,
-                          check_interval=60, segments_per_task=100, throttle=10, dry_run=False):
+                          check_interval=60, segments_per_task=100, throttle=50, dry_run=False):
     """
     Submit a job for one crawl date and wait for it to complete before returning.
     
@@ -125,7 +125,7 @@ def submit_and_wait_for_job(date, n_files, template_content, job_name_prefix="ba
 def process_crawl_data_sequentially(crawl_dates, n_files_list, template_content, 
                                   job_name_prefix="batch_job", partition=None, 
                                   time_limit=None, mem=None, cpus_per_task=None,
-                                  check_interval=60, segments_per_task=100, dry_run=False):
+                                  check_interval=60, segments_per_task=100, throttle=50, dry_run=False):
     """
     Process each crawl date sequentially, waiting for each job to finish before starting the next.
     
@@ -161,6 +161,7 @@ def process_crawl_data_sequentially(crawl_dates, n_files_list, template_content,
             cpus_per_task=cpus_per_task,
             check_interval=check_interval,
             segments_per_task=segments_per_task,
+            throttle=throttle,
             dry_run=dry_run
         )
         
@@ -182,6 +183,7 @@ def main():
                       help="How often to check job status (seconds)")
     parser.add_argument("--crawl-dates-file", help="Path to file with crawl dates and file counts")
     parser.add_argument("--segments-per-task", type=int, default=100, help="Segments per task")
+    parser.add_argument("--throttle", type=int, default=50, help="Maximum number of concurrent array tasks")
     parser.add_argument("--dry-run", action="store_true", help="Run in dry-run mode (do not submit jobs)")
     args = parser.parse_args()
     
@@ -220,6 +222,7 @@ def main():
         cpus_per_task=args.cpus,
         check_interval=args.check_interval,
         segments_per_task=args.segments_per_task,
+        throttle=args.throttle,
         dry_run=args.dry_run
     )
     
