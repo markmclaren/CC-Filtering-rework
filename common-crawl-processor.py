@@ -9,6 +9,7 @@ import time
 from warcio.archiveiterator import ArchiveIterator
 from urllib.parse import urljoin
 import re
+import threading
 
 def setup_logging(job_id=None):
     """Configure logging for the application"""
@@ -25,11 +26,17 @@ def setup_logging(job_id=None):
     )
     return logging.getLogger(__name__)
 
-def download_file(url, output_path, max_retries=5, retry_delay=1):
-    """Download a file with retry logic"""
+def heartbeat(logger, interval=300):
+    """Log a heartbeat message every interval seconds."""
+    while getattr(threading.current_thread(), "keep_running", True):
+        logger.info("[HEARTBEAT] Still running...")
+        time.sleep(interval)
+
+def download_file(url, output_path, max_retries=5, retry_delay=1, timeout=300):
+    """Download a file with retry logic and timeout"""
     for attempt in range(max_retries):
         try:
-            with requests.get(url, stream=True) as response:
+            with requests.get(url, stream=True, timeout=timeout) as response:
                 response.raise_for_status()
                 with open(output_path, 'wb') as f:
                     shutil.copyfileobj(response.raw, f)
@@ -148,6 +155,7 @@ def load_postcode_lookup(file_path):
             logging.error(f"Error loading postcode lookup file: {e}")
     return None
 
+import sys
 def main():
     parser = argparse.ArgumentParser(description="Process CommonCrawl WET files")
     parser.add_argument("--crawl-date", type=str, required=True, help="Crawl date identifier (e.g., 202350)")
@@ -165,6 +173,11 @@ def main():
     
     global logger
     logger = setup_logging(args.job_id)
+
+    # Start heartbeat thread (runs until program exit)
+    heartbeat_thread = threading.Thread(target=heartbeat, args=(logger, 300), daemon=True)
+    heartbeat_thread.keep_running = True
+    heartbeat_thread.start()
     
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
@@ -196,6 +209,11 @@ def main():
             successful_segments += 1
     
     logger.info(f"Processing completed: {successful_segments}/{len(segment_numbers)} segments successful")
+    # Stop heartbeat thread and exit
+    heartbeat_thread.keep_running = False
+    # Give heartbeat thread a moment to log final message
+    time.sleep(1)
+    sys.exit(0)
 
 if __name__ == "__main__":
     main()

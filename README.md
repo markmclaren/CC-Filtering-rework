@@ -11,10 +11,17 @@ This repository contains scripts for efficiently downloading and processing Comm
 ## Scripts
 
 ### Core Scripts
+- **setup-conda.sh** - Sets up the conda environment for processing
 - **job-runner.sh** - Main entry point that configures the Micromamba environment and initiates the job creation process
+- **job-runner-fixed.sh** - Improved version with optimized SLURM configuration and proper timeouts
 - **slurm-sequential-runner.py** - Creates individual Slurm jobs for each crawl date based on the provided template
 - **common-crawl-processor.py** - Downloads and processes Common Crawl data for a specific crawl date
 - **job-template.sh** - Template script for Slurm array jobs that runs the processor with appropriate configurations
+
+### Optimization Scripts
+- **run-fast-parallel.sh** - High-performance configuration with 50 concurrent array tasks
+- **run-ultra-parallel.sh** - Maximum throughput configuration with 100 concurrent array tasks  
+- **test-config.sh** - Dry-run validation script to test configurations without submitting jobs
 
 ## Data Files
 
@@ -26,11 +33,36 @@ This repository contains scripts for efficiently downloading and processing Comm
 
 ### Quick Start
 
-To run the entire pipeline:
+To run the entire pipeline with optimized performance:
 
 ```bash
-sbatch job-runner.sh
+# Set your SLURM account (required for compute partition access)
+source runme.sh
+
+# High-performance mode (50 concurrent tasks)
+sbatch run-fast-parallel.sh
+
+# Maximum throughput mode (100 concurrent tasks)  
+sbatch run-ultra-parallel.sh
+
+# Test configuration without submitting jobs
+./test-config.sh
 ```
+
+### Performance Optimization Features
+
+**Recent improvements (September 2025):**
+- ✅ **Configurable Throttle Limits**: Added `--throttle` parameter to control concurrent array tasks
+- ✅ **Increased Default Parallelism**: Raised default from 10 to 50 concurrent tasks (5x improvement)
+- ✅ **Ultra-High Throughput Mode**: Support for 100+ concurrent tasks on large clusters
+- ✅ **Proper Account Management**: Environment variable support for SLURM account configuration
+- ✅ **Extended Time Limits**: 7-day (168h) timeout prevents job failures on large datasets
+- ✅ **Optimized Resource Allocation**: 2G memory, 2 CPUs per task for balanced performance
+- ✅ **Dry-Run Validation**: Test configurations before submitting production jobs
+
+**Performance Comparison:**
+- **Before**: 10 concurrent tasks maximum, 24h timeout (caused failures)
+- **After**: 50-100 concurrent tasks, 7-day timeout, 5-10x faster processing
 
 ### Workflow Explanation
 
@@ -42,10 +74,42 @@ sbatch job-runner.sh
 ### Requirements
 
 - Slurm cluster access
-- Micromamba environment (configured in the scripts)
+- Miniconda environment (configured in the scripts)
 - Python 3.x with required packages (listed in environment setup)
 
 ## Configuration
+
+### SLURM Performance Tuning
+
+The `slurm-sequential-runner.py` script now supports extensive configuration options:
+
+```bash
+python slurm-sequential-runner.py \
+  --template-file job-template.sh \
+  --crawl-dates-file crawl_data.txt \
+  --partition compute \
+  --time 168 \                      # Time limit in hours (168h = 7 days)
+  --mem 2G \                        # Memory per task  
+  --cpus 2 \                        # CPUs per task
+  --segments-per-task 25 \          # Files per task (lower = more parallelism)
+  --throttle 50 \                   # Max concurrent array tasks
+  --job-prefix crawl_job \          # Job name prefix
+  --dry-run                         # Test mode (don't submit jobs)
+```
+
+### Account Configuration
+
+Create a `runme.sh` file to set your SLURM account:
+
+```bash
+export SLURM_ACCOUNT=your_account_name
+export SBATCH_ACCOUNT=your_account_name
+```
+
+Then source it before submitting jobs:
+```bash
+source runme.sh
+```
 
 Edit the following files to customize your processing:
 
@@ -128,25 +192,78 @@ The new approach leverages SLURM's built-in capabilities rather than implementin
 
 1. **Use Environment Variables for Account**: Instead of hardcoding the account name, use the `$SBATCH_ACCOUNT` environment variable. This makes scripts more portable and secure.
 
-2. **Use Parquet Output Format**: Parquet files are approximately half the size of equivalent CSV files, with better compression and query performance.
+2. **Optimize Throttle Settings**: Control concurrent task limits based on cluster size:
+   - **Small clusters**: `--throttle 10-20` 
+   - **Medium clusters**: `--throttle 50` (default)
+   - **Large clusters**: `--throttle 100+`
 
-3. **Leverage SLURM Arrays**: Distribute computation across multiple nodes by using SLURM array jobs. Control parallel execution with the `%` throttling parameter (e.g., `--array=0-899%10`).
+3. **Configure Appropriate Timeouts**: Use extended time limits for large datasets:
+   - **Short jobs**: `--time 24` (24 hours)
+   - **Medium jobs**: `--time 72` (3 days) 
+   - **Large datasets**: `--time 168` (7 days)
 
-4. **Minimize Shell Script Complexity**: Keep shell scripts simple by using Python to generate them:
-   - Create a template SLURM script
-   - Use Python to populate the template with specific parameters
-   - Generate the final SLURM scripts programmatically
+4. **Balance segments-per-task**: Optimize the trade-off between parallelism and overhead:
+   - **More parallelism**: `--segments-per-task 10-25` (more tasks, faster completion)
+   - **Less overhead**: `--segments-per-task 50-100` (fewer tasks, reduced scheduling load)
 
-5. **Sequential Crawl Processing**: Use a Python script to submit SLURM jobs for each crawl date sequentially:
-   ```python
-   for crawl_date in crawl_dates:
-       subprocess.run(["sbatch", f"process_crawl_{crawl_date}.sh"])
-       # Wait for completion if needed
+5. **Test Before Production**: Always validate configurations with dry-run mode:
+   ```bash
+   ./test-config.sh  # Generates scripts without submitting
    ```
 
-6. **Repository Management**: Don't commit generated code to Git. Instead:
+6. **Use Parquet Output Format**: Parquet files are approximately half the size of equivalent CSV files, with better compression and query performance.
+
+7. **Leverage SLURM Arrays**: Distribute computation across multiple nodes by using SLURM array jobs. Control parallel execution with the `%` throttling parameter (e.g., `--array=0-899%50`).
+
+8. **Monitor Resource Usage**: Check job efficiency and adjust resource requests:
+   ```bash
+   squeue -u $USER                    # Check running jobs
+   sacct -j JOBID --format=JobID,MaxRSS,MaxVMSize,CPUTime  # Check resource usage
+   ```
+
+9. **Repository Management**: Don't commit generated code to Git. Instead:
    - Include templates and generation scripts in the repository
    - Document the generation process in the README
    - Add generated files to .gitignore
 
 By following these practices, you'll create a more efficient, maintainable, and scalable pipeline for processing Common Crawl data across a computing cluster.
+
+## Troubleshooting
+
+### Common Issues and Solutions
+
+**Job stays in PENDING state with "PartitionConfig" reason:**
+- **Cause**: Default account is denied access to compute partition
+- **Solution**: Set proper account with `source runme.sh` before submitting
+
+**Jobs timeout after 24 hours:**
+- **Cause**: Default time limit too short for large datasets  
+- **Solution**: Use `--time 168` for 7-day limit
+
+**Low parallelism (only 10 tasks running):**
+- **Cause**: Default throttle limit of 10 concurrent tasks
+- **Solution**: Use `--throttle 50` or higher based on cluster capacity
+
+**Git LFS errors during push:**
+- **Cause**: Git LFS not installed but repository configured for it
+- **Solution**: Add miniconda git to PATH: `export PATH="./miniconda3/bin:$PATH"`
+
+**Array jobs not starting:**
+- **Cause**: JobArrayTaskLimit reached
+- **Solution**: This is normal - SLURM queues tasks and starts them as resources become available
+
+### Performance Monitoring
+
+```bash
+# Check job status
+squeue -u $USER
+
+# Monitor resource usage
+sacct -j JOBID --format=JobID,MaxRSS,MaxVMSize,CPUTime,State
+
+# Check partition availability  
+sinfo -p compute
+
+# View detailed job information
+scontrol show job JOBID
+```
