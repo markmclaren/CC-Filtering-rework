@@ -2,8 +2,8 @@
 *.out
 *.log
 runme.sh
+work
 tmp/
-work/
 output/
 202104/
 202104-output/
