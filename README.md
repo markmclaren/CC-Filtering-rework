@@ -11,7 +11,7 @@ This repository contains scripts for efficiently downloading and processing Comm
 ## Scripts
 
 ### Core Scripts
-- **setup-conda.sh** - Sets up the conda environment for processing
+- **setup-conda-env.sh** - Sets up the conda environment for processing
 - **job-runner.sh** - Main entry point that configures the Micromamba environment and initiates the job creation process
 - **job-runner-fixed.sh** - Improved version with optimized SLURM configuration and proper timeouts
 - **slurm-sequential-runner.py** - Creates individual Slurm jobs for each crawl date based on the provided template
@@ -21,10 +21,14 @@ This repository contains scripts for efficiently downloading and processing Comm
 ### Optimization Scripts
 - **run-fast-parallel.sh** - High-performance configuration with 50 concurrent array tasks
 - **run-ultra-parallel.sh** - Maximum throughput configuration with 100 concurrent array tasks  
+- **run-disk-safe-parallel.sh** - Conservative parallel mode designed to prevent disk space issues and reduce I/O load
+- **run-optimized-job.sh** - Optimized job configuration with balanced resource allocation for general-purpose processing
 - **test-config.sh** - Dry-run validation script to test configurations without submitting jobs
 
 ### Monitoring Scripts
 - **job-status.sh** - Comprehensive SLURM job status monitoring with progress tracking and estimates
+- **job-status-detailed.sh** - Extended job analysis with comprehensive log file examination and completion statistics
+- **monitor-disk-usage.sh** - Real-time disk usage monitoring and alerts for storage management
 - **file-analysis.sh** - Detailed analysis of generated output files, sizes, and storage usage
 - **file-summary.sh** - Quick summary of key output metrics and recent file activity
 
@@ -32,6 +36,10 @@ This repository contains scripts for efficiently downloading and processing Comm
 - **job-review.sh** - Comprehensive analysis of completed SLURM jobs including success rates, runtime statistics, and performance insights
 - **log-analysis.sh** - SLURM log file analysis for error detection, completion verification, and troubleshooting
 - **analyze-failures.sh** - Detailed investigation of failed tasks to identify root causes and error patterns
+- **check-disk-failures.sh** - Disk space analysis and cleanup recommendations for storage-related failures
+
+### Utility Scripts
+- **cleanup.sh** - Cleanup utility for removing temporary files, logs, and intermediate processing artifacts
 
 ## Data Files
 
