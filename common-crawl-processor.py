@@ -185,6 +185,11 @@ def main():
     # Load postcode lookup data
     postcode_lookup = load_postcode_lookup(args.postcode_lookup)
     
+    # Check disk space before downloading
+    if not check_disk_space(min_gb=2):
+        print("Insufficient disk space, exiting safely")
+        sys.exit(121)  # Custom exit code for disk space
+    
     # Determine which segment(s) to process
     if args.segment is not None:
         # Direct invocation with specific segment
@@ -214,6 +219,16 @@ def main():
     # Give heartbeat thread a moment to log final message
     time.sleep(1)
     sys.exit(0)
+
+def check_disk_space(min_gb=5):
+    """Check available disk space before downloading"""
+    total, used, free = shutil.disk_usage('.')
+    free_gb = free // (1024**3)
+    
+    if free_gb < min_gb:
+        print(f"WARNING: Low disk space! {free_gb}GB remaining")
+        return False
+    return True
 
 if __name__ == "__main__":
     main()

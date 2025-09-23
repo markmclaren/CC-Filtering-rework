@@ -28,6 +28,11 @@ This repository contains scripts for efficiently downloading and processing Comm
 - **file-analysis.sh** - Detailed analysis of generated output files, sizes, and storage usage
 - **file-summary.sh** - Quick summary of key output metrics and recent file activity
 
+### Post-Completion Analysis Scripts
+- **job-review.sh** - Comprehensive analysis of completed SLURM jobs including success rates, runtime statistics, and performance insights
+- **log-analysis.sh** - SLURM log file analysis for error detection, completion verification, and troubleshooting
+- **analyze-failures.sh** - Detailed investigation of failed tasks to identify root causes and error patterns
+
 ## Data Files
 
 - **BristolPostcodeLookup.parquet** - Lookup table for Bristol postcodes used in data filtering
@@ -59,7 +64,7 @@ sbatch run-ultra-parallel.sh
 Track your job progress and output files with built-in monitoring tools:
 
 ```bash
-# Check job status and progress
+# Check job status and progress (for running jobs)
 ./job-status.sh
 
 # Analyze output files and storage usage
@@ -71,6 +76,34 @@ Track your job progress and output files with built-in monitoring tools:
 # Combined monitoring
 ./job-status.sh && echo "" && ./file-summary.sh
 ```
+
+### Post-Completion Analysis
+
+Once your jobs complete, use these tools to analyze performance and investigate issues:
+
+```bash
+# Comprehensive job completion review
+./job-review.sh
+
+# Analyze SLURM logs for errors and patterns
+./log-analysis.sh
+
+# Investigate specific failure causes (exit codes, error patterns)
+./analyze-failures.sh
+
+# Combined post-completion analysis
+./job-review.sh && echo "" && ./log-analysis.sh
+```
+
+**Post-Completion Analysis Features:**
+- 📊 **Success/failure statistics** with completion percentages
+- ⏱️ **Runtime analysis** including min/max/average task durations
+- 💾 **Memory usage efficiency** and resource utilization metrics
+- 🖥️ **Node distribution analysis** showing cluster usage patterns
+- 🚨 **Failed job identification** with specific exit codes and error patterns
+- 🔍 **Log file analysis** for error detection and troubleshooting
+- 🎯 **Performance recommendations** based on actual job metrics
+- 📈 **Comparative analysis** against expected vs actual performance
 
 **Monitoring Features:**
 - 📊 **Real-time progress tracking** with completion percentages
@@ -277,6 +310,11 @@ By following these practices, you'll create a more efficient, maintainable, and 
 - **Cause**: Default throttle limit of 10 concurrent tasks
 - **Solution**: Use `--throttle 50` or higher based on cluster capacity
 
+**Exit code 120 failures in completed jobs:**
+- **Cause**: Application-specific processing errors (not SLURM issues)
+- **Investigation**: Use `./analyze-failures.sh` to identify error patterns
+- **Common causes**: Missing/corrupted crawl data, network timeouts, data format issues
+
 **Git LFS errors during push:**
 - **Cause**: Git LFS not installed but repository configured for it
 - **Solution**: Add miniconda git to PATH: `export PATH="./miniconda3/bin:$PATH"`
@@ -285,7 +323,6 @@ By following these practices, you'll create a more efficient, maintainable, and 
 - **Cause**: Micromamba instability in HPC environments
 - **Solution**: Use Miniconda3 instead - more stable and reliable for cluster computing
 - **Migration**: Update scripts to use `./miniconda3/bin/python` instead of micromamba commands
-- **Solution**: Add miniconda git to PATH: `export PATH="./miniconda3/bin:$PATH"`
 
 **Array jobs not starting:**
 - **Cause**: JobArrayTaskLimit reached
@@ -294,17 +331,44 @@ By following these practices, you'll create a more efficient, maintainable, and 
 ### Performance Monitoring
 
 ```bash
-# Check job status
+# Check job status (running jobs)
 squeue -u $USER
 
-# Monitor resource usage
+# Monitor resource usage (completed jobs)
 sacct -j JOBID --format=JobID,MaxRSS,MaxVMSize,CPUTime,State
+
+# Comprehensive post-completion analysis
+./job-review.sh
 
 # Check partition availability  
 sinfo -p compute
 
 # View detailed job information
 scontrol show job JOBID
+
+# Analyze error patterns in failed jobs
+./analyze-failures.sh
+```
+
+### Job Completion Analysis
+
+After your jobs complete, use the analysis tools to understand performance:
+
+```bash
+# Overall job performance and statistics
+./job-review.sh
+
+# Error analysis and troubleshooting
+./log-analysis.sh
+
+# Specific failure investigation
+./analyze-failures.sh
+
+# Example output insights:
+# ✅ 65.8% success rate (5,058/7,680 tasks)
+# ⏱️ Average runtime: 19 minutes per task
+# 💾 Memory efficiency: 5.9% (120MB used of 2GB allocated)
+# 🎯 No timeout failures (7-day limit successful)
 ```
 
 ## Git LFS Setup and Data Download
