@@ -3,6 +3,7 @@
 *.log
 runme.sh
 tmp/
+work/
 output/
 202104/
 202104-output/
