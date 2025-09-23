@@ -13,14 +13,20 @@ import threading
 
 def setup_logging(job_id=None):
     """Configure logging for the application"""
+    # Get the job working directory from environment variable
+    job_workdir = os.environ.get('JOB_WORKDIR', '.')
+    
     # Include job ID in log filename if provided
     log_filename = f"commoncrawl_processor_{job_id}.log" if job_id else "commoncrawl_processor.log"
+    
+    # Create full path to log file in the working directory
+    log_filepath = os.path.join(job_workdir, log_filename)
     
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(log_filename),
+            logging.FileHandler(log_filepath),
             logging.StreamHandler()
         ]
     )

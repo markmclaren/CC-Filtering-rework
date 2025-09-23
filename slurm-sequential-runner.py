@@ -60,10 +60,11 @@ def submit_and_wait_for_job(date, n_files, template_content, job_name_prefix="ba
     job_name = f"{job_name_prefix}_{date}"
     
     # Create Slurm object with parameters
+    job_workdir = os.environ.get('JOB_WORKDIR', '.')
     slurm_params = {
         "job_name": job_name,
-        "output": f"{job_name}_%j.out",
-        "error": f"{job_name}_%j.err",
+        "output": f"{job_workdir}/{job_name}_%j.out",
+        "error": f"{job_workdir}/{job_name}_%j.err",
     }
     
     # Add optional parameters if provided

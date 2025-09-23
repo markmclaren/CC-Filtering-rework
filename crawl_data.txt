@@ -1,6 +1,6 @@
 # Crawl dates and file counts
 # Format: date number_of_files
-# 202104 79840
+202104 79840
 202110 64000
 202117 64000
 202121 64000
