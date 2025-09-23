@@ -9,6 +9,11 @@ echo "=========================================="
 echo "Generated: $(date)"
 echo ""
 
+# Use JOB_WORKDIR if set, otherwise current directory
+WORK_DIR="${JOB_WORKDIR:-$(pwd)}"
+echo "Working directory: $WORK_DIR"
+echo ""
+
 # Check if user has any jobs running
 JOBS=$(squeue -u $USER -h | wc -l)
 if [ $JOBS -eq 0 ]; then
@@ -20,48 +25,95 @@ echo "📊 CURRENT JOB STATUS"
 echo "----------------------------------------"
 
 # Get main orchestrator job info
-MAIN_JOB=$(squeue -u $USER -h | grep "run-fast\|run-ultra\|run-optimized" | head -1)
+MAIN_JOB=$(squeue -u $USER -h | grep -E "run-fast|run-ultra|run-optimized" | head -1)
 if [ ! -z "$MAIN_JOB" ]; then
     MAIN_ID=$(echo $MAIN_JOB | awk '{print $1}')
     MAIN_TIME=$(echo $MAIN_JOB | awk '{print $6}')
     echo "🎯 Main orchestrator job: $MAIN_ID (Runtime: $MAIN_TIME)"
-else
-    echo "⚠️  No main orchestrator job found"
 fi
 
-# Count running array tasks
-RUNNING_TASKS=$(squeue -u $USER -h | grep -E "13539494_|crawl_jo" | wc -l)
-echo "🚀 Array tasks running: $RUNNING_TASKS"
+# Find the current array job
+ARRAY_ID=$(squeue -u $USER -h | grep "_" | head -1 | awk '{print $1}' | cut -d'_' -f1)
 
-# Get array job details
-ARRAY_JOB=$(squeue -u $USER -h | grep "13539494\[" | head -1)
-if [ ! -z "$ARRAY_JOB" ]; then
-    PENDING_RANGE=$(echo $ARRAY_JOB | awk '{print $1}' | grep -o '\[[0-9-]*%' | tr -d '[%')
-    echo "⏳ Pending tasks range: $PENDING_RANGE"
-fi
-
-# Count completed tasks
-echo ""
-echo "📈 COMPLETION STATISTICS"
-echo "----------------------------------------"
-
-# Get array job ID (assumes format 13539494)
-ARRAY_ID=$(squeue -u $USER -h | grep -o "13539494" | head -1)
 if [ ! -z "$ARRAY_ID" ]; then
+    echo "🎯 Array job ID: $ARRAY_ID"
+    
+    # Count running array tasks
+    RUNNING_TASKS=$(squeue -u $USER -h | grep "${ARRAY_ID}_" | wc -l)
+    echo "🚀 Array tasks running: $RUNNING_TASKS"
+    
+    echo ""
+    echo "📈 COMPLETION STATISTICS"
+    echo "----------------------------------------"
+    
+    # Get completion stats from sacct (this was working well before)
     COMPLETED=$(sacct -j $ARRAY_ID --format=JobID,State -n 2>/dev/null | grep "COMPLETED" | wc -l)
+    FAILED=$(sacct -j $ARRAY_ID --format=JobID,State -n 2>/dev/null | grep "FAILED" | wc -l)
+    
     echo "✅ Completed tasks: $COMPLETED"
     
+    # Get total tasks from pending job range
+    PENDING_JOB=$(squeue -u $USER -h | grep "${ARRAY_ID}\[" | head -1)
+    if [ ! -z "$PENDING_JOB" ]; then
+        # Extract the range like [421-2559]
+        RANGE=$(echo $PENDING_JOB | awk '{print $1}' | grep -o '\[[0-9-]*\]' | tr -d '[]')
+        if [[ "$RANGE" =~ ^[0-9]+-[0-9]+$ ]]; then
+            START=$(echo $RANGE | cut -d'-' -f1)
+            END=$(echo $RANGE | cut -d'-' -f2)
+            TOTAL_TASKS=$((END + 1))  # Add 1 because arrays are 0-indexed
+        fi
+    fi
+    
+    # If we couldn't get total from pending range, try a different approach
+    if [ -z "$TOTAL_TASKS" ]; then
+        # Use a reasonable default based on your setup
+        TOTAL_TASKS=2643
+        echo "ℹ️  Using default total tasks: $TOTAL_TASKS"
+    else
+        echo "📊 Total tasks: $TOTAL_TASKS"
+    fi
+    
     # Calculate progress
-    TOTAL_TASKS=2643  # Update this if your total changes
     PROCESSED=$((COMPLETED + RUNNING_TASKS))
     REMAINING=$((TOTAL_TASKS - PROCESSED))
-    PROGRESS=$(echo "scale=1; $PROCESSED * 100 / $TOTAL_TASKS" | bc -l 2>/dev/null || echo "N/A")
     
     echo "🏃 Currently processing: $PROCESSED tasks"
     echo "⏰ Remaining in queue: $REMAINING tasks"
-    echo "📊 Overall progress: $PROGRESS% complete"
+    
+    if [ $TOTAL_TASKS -gt 0 ]; then
+        PROGRESS=$(echo "scale=1; $PROCESSED * 100 / $TOTAL_TASKS" | bc -l)
+        echo "📊 Overall progress: $PROGRESS% complete"
+    fi
+    
+    # Calculate completion rate and time estimate
+    if [ ! -z "$MAIN_TIME" ] && [ $COMPLETED -gt 0 ]; then
+        # Convert runtime to minutes
+        if [[ "$MAIN_TIME" =~ ^([0-9]+):([0-9]+):([0-9]+)$ ]]; then
+            HOURS=${BASH_REMATCH[1]}
+            MINS=${BASH_REMATCH[2]}
+            TOTAL_MINUTES=$((HOURS * 60 + MINS))
+        elif [[ "$MAIN_TIME" =~ ^([0-9]+):([0-9]+)$ ]]; then
+            MINS=${BASH_REMATCH[1]}
+            TOTAL_MINUTES=$MINS
+        fi
+        
+        if [ ! -z "$TOTAL_MINUTES" ] && [ $TOTAL_MINUTES -gt 0 ]; then
+            RATE=$(echo "scale=2; $COMPLETED * 60 / $TOTAL_MINUTES" | bc -l)
+            if [ $REMAINING -gt 0 ] && [ $(echo "$RATE > 0" | bc -l) -eq 1 ]; then
+                TIME_REMAINING_HOURS=$(echo "scale=1; $REMAINING / $RATE" | bc -l)
+                TIME_REMAINING_DAYS=$(echo "scale=1; $TIME_REMAINING_HOURS / 24" | bc -l)
+                
+                echo ""
+                echo "⏰ ESTIMATED COMPLETION"
+                echo "----------------------------------------"
+                echo "📈 Completion rate: $RATE tasks/hour"
+                echo "⏳ Estimated time remaining: $TIME_REMAINING_HOURS hours (~$TIME_REMAINING_DAYS days)"
+            fi
+        fi
+    fi
+    
 else
-    echo "⚠️  Array job ID not found"
+    echo "⚠️  No array job found"
 fi
 
 echo ""
@@ -72,41 +124,24 @@ echo "----------------------------------------"
 NODES=$(squeue -u $USER -h | awk '{print $8}' | grep -o 'bp1-compute[0-9]*' | sort -u | wc -l)
 echo "🏗️  Compute nodes in use: $NODES"
 
-# Calculate CPU usage (assuming 2 CPUs per task)
-CPUS=$((RUNNING_TASKS * 2))
+# Calculate CPU usage
+TOTAL_RUNNING=$(squeue -u $USER -h | wc -l)
+CPUS=$((TOTAL_RUNNING * 8))
 echo "⚡ Total CPUs in use: $CPUS"
 
 # Show node distribution
-echo ""
-echo "📍 NODE DISTRIBUTION"
-echo "----------------------------------------"
-squeue -u $USER -h | awk '{print $8}' | grep -o 'bp1-compute[0-9]*' | sort | uniq -c | sort -nr | head -10
+if [ $NODES -gt 0 ]; then
+    echo ""
+    echo "📍 NODE DISTRIBUTION"
+    echo "----------------------------------------"
+    squeue -u $USER -h | awk '{print $8}' | grep -o 'bp1-compute[0-9]*' | sort | uniq -c | sort -nr | head -10
+fi
 
 echo ""
 echo "⏱️  RUNTIME ANALYSIS"
 echo "----------------------------------------"
-
-# Show runtime distribution
 echo "📋 Current task runtimes:"
-squeue -u $USER -h | grep "13539494_" | awk '{print $6}' | sort | uniq -c | sort -nr | head -5
-
-# Calculate estimated completion
-if [ ! -z "$COMPLETED" ] && [ $COMPLETED -gt 0 ]; then
-    # Rough calculation based on current completion rate
-    HOURS_RUNNING=$(echo $MAIN_TIME | awk -F: '{if(NF==3) print $1 + $2/60 + $3/3600; else print $1/60 + $2/3600}')
-    if [ ! -z "$HOURS_RUNNING" ] && [ ! -z "$REMAINING" ]; then
-        RATE=$(echo "scale=2; $COMPLETED / $HOURS_RUNNING" | bc -l 2>/dev/null)
-        if [ ! -z "$RATE" ] && [ "$RATE" != "0" ]; then
-            EST_HOURS=$(echo "scale=1; $REMAINING / $RATE" | bc -l 2>/dev/null)
-            EST_DAYS=$(echo "scale=1; $EST_HOURS / 24" | bc -l 2>/dev/null)
-            echo ""
-            echo "⏰ ESTIMATED COMPLETION"
-            echo "----------------------------------------"
-            echo "📈 Completion rate: $RATE tasks/hour"
-            echo "⏳ Estimated time remaining: $EST_HOURS hours (~$EST_DAYS days)"
-        fi
-    fi
-fi
+squeue -u $USER -h | awk '{print $6}' | sort | uniq -c | sort -nr | head -5
 
 echo ""
 echo "🔍 DETAILED QUEUE STATUS"
@@ -115,7 +150,8 @@ squeue -u $USER
 
 echo ""
 echo "=========================================="
-echo "💡 To refresh this report, run: ./job-status.sh"
+echo "💡 To refresh this report, run: source runme.sh && ./job-status.sh"
 echo "🛠️  To cancel jobs, run: scancel JOBID"
 echo "📊 For detailed job info: scontrol show job JOBID"
+echo "🔍 Check logs: ls -la $WORK_DIR/*.{out,err,log}"
 echo "=========================================="

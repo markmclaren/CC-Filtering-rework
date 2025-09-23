@@ -6,6 +6,11 @@ echo "=========================================="
 echo "Generated: $(date)"
 echo ""
 
+# Use JOB_WORKDIR if set, otherwise current directory
+WORK_DIR="${JOB_WORKDIR:-$(pwd)}"
+echo "Working directory: $WORK_DIR"
+echo ""
+
 # Get the most recent completed job array (assuming it's your main job)
 RECENT_JOB=$(sacct -u $USER --format=JobID,JobName,State,ExitCode,Start,End,Elapsed --parsable2 | grep "crawl_jo" | head -1 | cut -d'|' -f1)
 MAIN_JOB=$(echo $RECENT_JOB | cut -d'_' -f1)
@@ -80,17 +85,43 @@ echo ""
 # Output file analysis
 echo "📁 OUTPUT FILE ANALYSIS"
 echo "----------------------------------------"
-if [ -f "./file-summary.sh" ]; then
-    ./file-summary.sh 2>/dev/null
+if [ -d "$WORK_DIR/output" ]; then
+    OUTPUT_FILES=$(find "$WORK_DIR/output" -name "*.parquet" 2>/dev/null | wc -l)
+    OUTPUT_SIZE=$(du -sh "$WORK_DIR/output" 2>/dev/null | cut -f1)
+    echo "📂 Output files: $OUTPUT_FILES parquet files"
+    echo "💾 Output size: $OUTPUT_SIZE"
 else
-    echo "Run ./file-summary.sh for detailed file analysis"
+    echo "❌ Output directory not found at $WORK_DIR/output"
 fi
+
+# Check for additional output directories
+for dir in 202104-output 202110-output; do
+    if [ -d "$WORK_DIR/$dir" ]; then
+        DIR_FILES=$(find "$WORK_DIR/$dir" -name "*.parquet" 2>/dev/null | wc -l)
+        DIR_SIZE=$(du -sh "$WORK_DIR/$dir" 2>/dev/null | cut -f1)
+        echo "📂 $dir: $DIR_FILES files ($DIR_SIZE)"
+    fi
+done
+
+echo ""
+
+# Log file summary
+echo "📄 LOG FILE SUMMARY"
+echo "----------------------------------------"
+OUT_FILES=$(ls "$WORK_DIR"/*.out 2>/dev/null | wc -l)
+ERR_FILES=$(ls "$WORK_DIR"/*.err 2>/dev/null | wc -l)
+LOG_FILES=$(ls "$WORK_DIR"/*.log 2>/dev/null | wc -l)
+echo "📝 SLURM output files: $OUT_FILES"
+echo "⚠️  SLURM error files: $ERR_FILES"
+echo "📋 Python processor logs: $LOG_FILES"
 
 echo ""
 echo "=========================================="
 echo "💡 Additional commands:"
 echo "   📊 Detailed accounting: sacct -j $MAIN_JOB --long"
 echo "   📝 Job details: scontrol show job $MAIN_JOB"
-echo "   📂 Check output: ls -la output/ 202104-output/"
-echo "   🗂️  Check logs: ls -la slurm-*.{out,err}"
+echo "   📂 Check output: ls -la $WORK_DIR/output/ $WORK_DIR/202104-output/"
+echo "   🗂️  Check logs: ls -la $WORK_DIR/*.{out,err,log}"
+echo "   🔍 Analyze logs: ./log-analysis.sh"
+echo "   🧹 Clean logs: rm $WORK_DIR/*.{out,err,log}"
 echo "=========================================="

@@ -32,5 +32,5 @@ trap cleanup EXIT INT TERM
   --job-id "${SLURM_JOB_ID}_${SLURM_ARRAY_TASK_ID}" \
   --segments-per-task ${SEGMENTS_PER_TASK} \
   --wet-paths wet.paths \
-  --output-dir output \
+  --output-dir "$JOB_WORKDIR/output" \
   --postcode-lookup BristolPostcodeLookup.parquet
