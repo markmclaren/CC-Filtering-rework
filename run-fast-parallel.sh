@@ -1,4 +1,8 @@
 #!/bin/bash
+#SBATCH --partition=compute       # Match your partition
+#SBATCH --time=168:00:00          # 7 days for parent (increase if needed, e.g., 200:00:00)
+#SBATCH --mem=2G                  # Low for launcher (it's mostly waiting)
+#SBATCH --cpus-per-task=1         # Minimal for launcher
 
 # High-parallelism configuration for faster processing
 # Runs 50 concurrent array tasks for quicker completion
