@@ -11,6 +11,17 @@ source ./runme.sh  # Load environment variables
 
 # Use WORKING_DIR from environment for analysis
 JOB_WORKDIR="${WORKING_DIR:-.}"
+ANALYSIS_DIR="${JOB_WORKDIR}/output"
+
+# 1. ERROR AND FAILURE ANALYSIS (*.err and *.log)
+ERR_FILES=("$JOB_WORKDIR"/*_${JOB_PREFIX}*.err "$JOB_WORKDIR"/*.err)
+LOG_FILES=("$JOB_WORKDIR"/*_${JOB_PREFIX}*.log "$JOB_WORKDIR"/*.log)
+
+# 2. LOG SUMMARY (*.log and *.out)
+TEMP_FILES=("${LOG_FILES[@]}" "$JOB_WORKDIR"/*_${JOB_PREFIX}*.out "$JOB_WORKDIR"/*.out)
+
+# 3. OUTPUT FILE ANALYSIS (*.parquet)
+PARQUET_FILES=("$ANALYSIS_DIR"/crawldata*.parquet)
 
 # Colors for output (with fallback if tput not available)
 RED=$(tput setaf 1 2>/dev/null || true; echo -n ${RED:-})
@@ -22,7 +33,6 @@ RESET=$(tput sgr0 2>/dev/null || true; echo -n ${RESET:-})
 # Defaults
 JOB_PREFIX="${1:-crawl_job}"
 DRY_RUN="${2:-}"
-ANALYSIS_DIR="${JOB_WORKDIR}/output"
 REPORT_FILE="analysis_report_${JOB_PREFIX}.txt"
 ERROR_THRESHOLD=5
 CONDA_ENV="./.conda_env"
@@ -57,7 +67,6 @@ ERROR_COUNT=0
 WARNING_COUNT=0
 FAILURE_DETAILS=""
 
-ERR_FILES=("$ANALYSIS_DIR"/*_${JOB_PREFIX}*.err "$ANALYSIS_DIR"/*.err)
 for file in "${ERR_FILES[@]}"; do
     if [[ -f "$file" ]]; then
         ERRORS=$(grep -i "error\|failed\|exception\|timeout" "$file" | wc -l)
@@ -69,7 +78,6 @@ for file in "${ERR_FILES[@]}"; do
     fi
 done
 
-LOG_FILES=("$ANALYSIS_DIR"/*_${JOB_PREFIX}*.log "$ANALYSIS_DIR"/*.log)
 for file in "${LOG_FILES[@]}"; do
     if [[ -f "$file" ]]; then
         ERRORS=$(grep -i "error\|failed to download\|error processing|logging.error" "$file" | wc -l)
@@ -109,7 +117,6 @@ TOTAL_RECORDS=0
 AVG_TIME_PER_SEG=0
 LOG_DETAILS=""
 
-TEMP_FILES=("${LOG_FILES[@]}" "$ANALYSIS_DIR"/*_${JOB_PREFIX}*.out "$ANALYSIS_DIR"/*.out)
 for file in "${TEMP_FILES[@]}"; do
     if [[ -f "$file" ]]; then
         SUCC=$(grep -o "Completed processing segment" "$file" | wc -l)
@@ -162,8 +169,6 @@ TOTAL_ROWS=0
 UNIQUE_POSTCODES=0
 QUALITY_NOTES=""
 PCT_WITH_PC="0"
-
-PARQUET_FILES=("$ANALYSIS_DIR"/crawldata*.parquet)
 
 if [[ ${#PARQUET_FILES[@]} -eq 0 ]]; then
     echo "${YELLOW}No Parquet files found. Skipping analysis.${RESET}"

@@ -27,7 +27,7 @@ These launcher scripts configure and submit the sequential runner for different 
 
 ### Monitoring & Analysis Scripts
 - **monitor-job.sh** - Real-time monitoring of running jobs: progress, resource usage, estimated completion time.
-- **job-analyzer.sh** - Post-completion analysis: success rates, runtimes, failures, and performance metrics from SLURM logs.
+- **job-analyser.sh** - Post-completion analysis: success rates, runtimes, failures, and performance metrics from SLURM logs.
 
 ### Data & Utility Files
 - **BristolPostcodeLookup.parquet** - Lookup table for Bristol postcodes used in data filtering.
@@ -90,15 +90,15 @@ sinfo -p compute  # Partition status
 ### Post-Completion Analysis
 After the sequential runner finishes all dates:
 ```bash
-# Analyze completed jobs (success, runtime, failures)
-./job-analyzer.sh
+# Analyse completed jobs (success, runtime, failures)
+./job-analyser.sh
 
 # Check logs/output
 sacct -j <JOB_ID> --format=JobID,State,ExitCode,MaxRSS,Elapsed  # Parent job
 ls *_%j.out *_%j.err  # Child job logs
 ```
 
-**Analysis Features** (via `job-analyzer.sh`):
+**Analysis Features** (via `job-analyser.sh`):
 - 📊 Success/failure rates and exit codes.
 - ⏱️ Runtime stats (min/max/avg per task/date).
 - 💾 Resource utilization (memory, CPU).
@@ -170,7 +170,7 @@ Edit these for customization:
 
 **Low Concurrency**: Increase `--throttle`; check `sinfo` for resources.
 
-**Exit Code 120**: App errors (e.g., download fails)—use `./job-analyzer.sh`.
+**Exit Code 120**: App errors (e.g., download fails)—use `./job-analyser.sh`.
 
 **Array Not Starting**: Normal queuing; SLURM throttles via `%`.
 
@@ -179,11 +179,11 @@ Edit these for customization:
 squeue -u $USER  # Running jobs
 sacct -j <ID> --format=JobID,State,Elapsed,MaxRSS  # Completed
 ./monitor-job.sh  # Custom progress
-./job-analyzer.sh  # Analysis
+./job-analyser.sh  # Analysis
 scontrol show job <ID>  # Details
 ```
 
-### Job Completion Insights (from `job-analyzer.sh`)
+### Job Completion Insights (from `job-analyser.sh`)
 - ✅ Success rate (e.g., 95% tasks complete).
 - ⏱️ Avg runtime per date.
 - 🚨 Failures by code/pattern.
