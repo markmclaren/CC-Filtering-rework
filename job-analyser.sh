@@ -7,55 +7,104 @@
 shopt -s nullglob
 set -euo pipefail
 
-source ./runme.sh  # Load environment variables
+# Source runme.sh only if present (avoid silent exit when file missing)
+if [[ -f ./runme.sh ]]; then
+    # shellcheck disable=SC1091
+    source ./runme.sh
+else
+    echo "Note: runme.sh not found; continuing with defaults" >&2
+fi
 
+# Defaults
+DRY_RUN="false"
+REPORT_FILE="analysis_report.txt"
+ERROR_THRESHOLD=5
+CONDA_ENV="./.conda_env"
+VERBOSE="false"
+DEBUG="false"
 # Use WORKING_DIR from environment for analysis
 JOB_WORKDIR="${WORKING_DIR:-.}"
 ANALYSIS_DIR="${JOB_WORKDIR}/output"
+# Parse arguments (handle --dry-run and --output-dir=)
+for arg in "$@"; do
+    case "$arg" in
+        --dry-run) DRY_RUN="true" ;;
+        --verbose|-v) VERBOSE="true" ;;
+        --debug) DEBUG="true" ;;
+        --output-dir=*) ANALYSIS_DIR="${arg#*=}" ;;
+        *) JOB_PREFIX="${arg}" ;; # optional positional argument kept for compatibility
+    esac
+done
 
-# 1. ERROR AND FAILURE ANALYSIS (*.err and *.log)
-ERR_FILES=("$JOB_WORKDIR"/*_${JOB_PREFIX}*.err "$JOB_WORKDIR"/*.err)
-LOG_FILES=("$JOB_WORKDIR"/*_${JOB_PREFIX}*.log "$JOB_WORKDIR"/*.log)
+# Colors for output (with reliable fallback)
+if tput colors >/dev/null 2>&1; then
+    RED=$(tput setaf 1)
+    GREEN=$(tput setaf 2)
+    YELLOW=$(tput setaf 3)
+    BLUE=$(tput setaf 4)
+    RESET=$(tput sgr0)
+else
+    RED=""
+    GREEN=""
+    YELLOW=""
+    BLUE=""
+    RESET=""
+fi
 
-# 2. LOG SUMMARY (*.log and *.out)
-TEMP_FILES=("${LOG_FILES[@]}" "$JOB_WORKDIR"/*_${JOB_PREFIX}*.out "$JOB_WORKDIR"/*.out)
+# Logging helpers (verbose/debug)
+log_info() {
+    if [[ "$VERBOSE" == "true" || "$DEBUG" == "true" ]]; then
+        echo -e "$@"
+    fi
+}
+log_debug() {
+    if [[ "$DEBUG" == "true" ]]; then
+        echo -e "$@"
+    fi
+}
 
-# 3. OUTPUT FILE ANALYSIS (*.parquet)
-PARQUET_FILES=("$ANALYSIS_DIR"/crawldata*.parquet)
+# If debug requested, enable shell tracing with helpful PS4
+if [[ "$DEBUG" == "true" ]]; then
+    export PS4='+ ${BASH_SOURCE}:${LINENO}:${FUNCNAME[0]}: '
+    set -x
+fi
 
-# Colors for output (with fallback if tput not available)
-RED=$(tput setaf 1 2>/dev/null || true; echo -n ${RED:-})
-GREEN=$(tput setaf 2 2>/dev/null || true; echo -n ${GREEN:-})
-YELLOW=$(tput setaf 3 2>/dev/null || true; echo -n ${YELLOW:-})
-BLUE=$(tput setaf 4 2>/dev/null || true; echo -n ${BLUE:-})
-RESET=$(tput sgr0 2>/dev/null || true; echo -n ${RESET:-})
-
-# Defaults
-JOB_PREFIX="${1:-crawl_job}"
-DRY_RUN="${2:-}"
-REPORT_FILE="analysis_report_${JOB_PREFIX}.txt"
-ERROR_THRESHOLD=5
-CONDA_ENV="./.conda_env"
-
-if [[ "$DRY_RUN" == "--dry-run" ]]; then
+if [[ "$DRY_RUN" == "true" ]]; then
     echo "${YELLOW}Dry-run mode: Simulating analysis without real checks.${RESET}"
     exit 0
 fi
 
-for arg in "$@"; do
-    if [[ $arg == --output-dir=* ]]; then
-        ANALYSIS_DIR="${arg#*=}"
-    fi
-done
+# Build file lists after args / env are resolved
+ERR_FILES=("$JOB_WORKDIR"/*.err)
+LOG_FILES=("$JOB_WORKDIR"/*.log)
+TEMP_FILES=("$JOB_WORKDIR"/*.out "${LOG_FILES[@]}")
+PARQUET_FILES=("$ANALYSIS_DIR"/*.parquet)
 
-echo "${BLUE}=== Job Analysis Report for Prefix: $JOB_PREFIX ===${RESET}"
+# Debug / verbose dump of resolved variables and globs
+log_info "${BLUE}--- Debug: resolved environment & globs ---${RESET}"
+log_info "JOB_WORKDIR=$JOB_WORKDIR"
+log_info "ANALYSIS_DIR=$ANALYSIS_DIR"
+log_info "REPORT_FILE=$REPORT_FILE"
+log_info "CONDA_ENV=$CONDA_ENV"
+log_info "DRY_RUN=$DRY_RUN VERBOSE=$VERBOSE DEBUG=$DEBUG"
+log_info "ERR_FILES (count=${#ERR_FILES[@]}):"
+log_debug "  ${ERR_FILES[*]:-<none>}"
+log_info "LOG_FILES (count=${#LOG_FILES[@]}):"
+log_debug "  ${LOG_FILES[*]:-<none>}"
+log_info "TEMP_FILES (count=${#TEMP_FILES[@]}):"
+log_debug "  ${TEMP_FILES[*]:-<none>}"
+log_info "PARQUET_FILES (count=${#PARQUET_FILES[@]}):"
+log_debug "  ${PARQUET_FILES[*]:-<none>}"
+log_info "${BLUE}--- End debug dump ---${RESET}"
+
+echo "${BLUE}=== Job Analysis Report ===${RESET}"
 echo "Analyzing in: $ANALYSIS_DIR"
 echo "Report generated: $(date)"
 echo "Saving detailed report to: $REPORT_FILE"
 echo ""
 
 {
-    echo "Job Analysis Report for $JOB_PREFIX"
+    echo "Job Analysis Report"
     echo "Generated: $(date)"
     echo ""
 } > "$REPORT_FILE"
@@ -69,23 +118,27 @@ FAILURE_DETAILS=""
 
 for file in "${ERR_FILES[@]}"; do
     if [[ -f "$file" ]]; then
-        ERRORS=$(grep -i "error\|failed\|exception\|timeout" "$file" | wc -l)
-        WARNINGS=$(grep -i "warning\|low\|insufficient" "$file" | wc -l)
+        ERRORS=$( (grep -i -E "error|failed|exception|timeout" "$file" || true) | wc -l )
+        WARNINGS=$( (grep -i -E "warning|low|insufficient" "$file" || true) | wc -l )
         ERROR_COUNT=$((ERROR_COUNT + ERRORS))
         WARNING_COUNT=$((WARNING_COUNT + WARNINGS))
-        FAILURE_DETAILS+=$(grep -i "error\|failed" "$file" | head -3)
-        FAILURE_DETAILS+="\nFrom file: $file\n\n"
+        tmp_fail=$((grep -i -E "error|failed" "$file" || true) | head -3)
+        if [[ -n "$tmp_fail" ]]; then
+            FAILURE_DETAILS+="$tmp_fail\nFrom file: $file\n\n"
+        fi
     fi
 done
 
 for file in "${LOG_FILES[@]}"; do
     if [[ -f "$file" ]]; then
-        ERRORS=$(grep -i "error\|failed to download\|error processing|logging.error" "$file" | wc -l)
-        WARNINGS=$(grep -i "warning\|no records|low disk" "$file" | wc -l)
+        ERRORS=$( (grep -i -E "error|failed to download|error processing|logging.error" "$file" || true) | wc -l )
+        WARNINGS=$( (grep -i -E "warning|no records|low disk" "$file" || true) | wc -l )
         ERROR_COUNT=$((ERROR_COUNT + ERRORS))
         WARNING_COUNT=$((WARNING_COUNT + WARNINGS))
-        FAILURE_DETAILS+=$(grep -i "error\|failed" "$file" | head -3)
-        FAILURE_DETAILS+="\nFrom file: $file\n\n"
+        tmp_fail=$((grep -i -E "error|failed" "$file" || true) | head -3)
+        if [[ -n "$tmp_fail" ]]; then
+            FAILURE_DETAILS+="$tmp_fail\nFrom file: $file\n\n"
+        fi
     fi
 done
 
@@ -119,11 +172,11 @@ LOG_DETAILS=""
 
 for file in "${TEMP_FILES[@]}"; do
     if [[ -f "$file" ]]; then
-        SUCC=$(grep -o "Completed processing segment" "$file" | wc -l)
+        SUCC=$( (grep -o "Completed processing segment" "$file" || true) | wc -l )
         SUCCESSFUL_SEGMENTS=$((SUCCESSFUL_SEGMENTS + SUCC))
-        RECS=$(grep "Completed processing segment" "$file" | awk '{sum += $NF} END {print sum + 0}' || echo "0")
+        RECS=$( (grep "Completed processing segment" "$file" || true) | awk '{sum += $NF} END {print sum + 0}' )
         TOTAL_RECORDS=$((TOTAL_RECORDS + RECS))
-        TIMES=$(grep -i "processing\|heartbeat" "$file" | awk '{if ($0 ~ /sec/) sum += $NF} END {print (sum > 0 ? sum / NR : 0)}' || echo "0")
+        TIMES=$( (grep -i -E "processing|heartbeat" "$file" || true) | awk 'BEGIN{cnt=0;sum=0} { if ($0 ~ /sec/) { sum += $NF; cnt++ } } END { print (cnt>0 ? int(sum/cnt) : 0) }' )
         if [[ $AVG_TIME_PER_SEG -eq 0 ]]; then
             AVG_TIME_PER_SEG=$TIMES
         else
