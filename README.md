@@ -6,431 +6,205 @@ Derived from original work here: [CC-Filtering](https://github.com/0emerald/CC-F
 
 ## Overview
 
-This repository contains scripts for efficiently downloading and processing Common Crawl data using a Slurm computing cluster. The workflow automatically creates and submits batch jobs for each crawl date, allowing for parallel processing of multiple crawl segments.
+This repository contains scripts for efficiently downloading and processing Common Crawl data using a Slurm computing cluster. The workflow uses SLURM array jobs for parallel processing within each crawl date, submitted sequentially across dates via a Python runner. This allows scalable handling of large datasets while controlling concurrency to avoid overwhelming resources.
 
 ## Scripts
 
 ### Core Scripts
-- **setup-conda-env.sh** - Sets up the conda environment for processing
-- **job-runner.sh** - Main entry point that configures the Micromamba environment and initiates the job creation process
-- **job-runner-fixed.sh** - Improved version with optimized SLURM configuration and proper timeouts
-- **slurm-sequential-runner.py** - Creates individual Slurm jobs for each crawl date based on the provided template
-- **common-crawl-processor.py** - Downloads and processes Common Crawl data for a specific crawl date
-- **job-template.sh** - Template script for Slurm array jobs that runs the processor with appropriate configurations
+- **setup-conda-env.sh** - Sets up the conda environment (`.conda_env`) for processing with required Python packages.
+- **slurm-sequential-runner.py** - Python script that reads crawl dates from `crawl_data.txt` and sequentially submits/manages a SLURM array job for each date (waiting for completion before the next).
+- **job-template.sh** - Template for individual SLURM array jobs; configures the environment and runs the processor.
+- **common-crawl-processor.py** - Core Python script that downloads and processes Common Crawl WET files for a given date and task ID.
 
-### Optimization Scripts
-- **run-fast-parallel.sh** - High-performance configuration with 50 concurrent array tasks
-- **run-ultra-parallel.sh** - Maximum throughput configuration with 100 concurrent array tasks  
-- **run-disk-safe-parallel.sh** - Conservative parallel mode designed to prevent disk space issues and reduce I/O load
-- **run-optimized-job.sh** - Optimized job configuration with balanced resource allocation for general-purpose processing
-- **test-config.sh** - Dry-run validation script to test configurations without submitting jobs
+### Run Scripts (Launchers/Optimization)
+These launcher scripts configure and submit the sequential runner for different parallelism levels. Run with `sbatch <script.sh>`.
 
-### Monitoring Scripts
-- **job-status.sh** - Comprehensive SLURM job status monitoring with progress tracking and estimates
-- **job-status-detailed.sh** - Extended job analysis with comprehensive log file examination and completion statistics
-- **monitor-disk-usage.sh** - Real-time disk usage monitoring and alerts for storage management
-- **file-analysis.sh** - Detailed analysis of generated output files, sizes, and storage usage
-- **file-summary.sh** - Quick summary of key output metrics and recent file activity
+- **run-fast-parallel.sh** - High-parallelism mode: 50 concurrent array tasks, 25 files per task, 7-day timeout.
+- **run-ultra-parallel.sh** - Maximum throughput: 100 concurrent array tasks, 10 files per task, 7-day timeout.
+- **run-disk-safe-parallel.sh** - Conservative mode: 20 concurrent tasks, 50 files per task, focuses on I/O safety.
+- **run-optimized-job.sh** - Balanced default: 30 concurrent tasks, 25 files per task.
+- **run-test-config.sh** - Dry-run mode: Generates scripts without submitting jobs for validation.
 
-### Post-Completion Analysis Scripts
-- **job-review.sh** - Comprehensive analysis of completed SLURM jobs including success rates, runtime statistics, and performance insights
-- **log-analysis.sh** - SLURM log file analysis for error detection, completion verification, and troubleshooting
-- **analyze-failures.sh** - Detailed investigation of failed tasks to identify root causes and error patterns
-- **check-disk-failures.sh** - Disk space analysis and cleanup recommendations for storage-related failures
+### Monitoring & Analysis Scripts
+- **monitor-job.sh** - Real-time monitoring of running jobs: progress, resource usage, estimated completion time.
+- **job-analyzer.sh** - Post-completion analysis: success rates, runtimes, failures, and performance metrics from SLURM logs.
 
-### Utility Scripts
-- **cleanup.sh** - Cleanup utility for removing temporary files, logs, and intermediate processing artifacts
-
-## Data Files
-
-- **BristolPostcodeLookup.parquet** - Lookup table for Bristol postcodes used in data filtering
-- **crawl_data.txt** - List of Common Crawl dates to process
-- **wet.paths** - Path information for Common Crawl WET files
+### Data & Utility Files
+- **BristolPostcodeLookup.parquet** - Lookup table for Bristol postcodes used in data filtering.
+- **crawl_data.txt** - List of crawl dates and file counts (format: `date num_files`, e.g., `202104 79840`).
+- **wet.paths** - Paths to Common Crawl WET files.
+- **error_patterns.txt** - Common error patterns for analysis.
+- **scripts.txt** - Quick reference to script purposes.
+- **slurm-config-guide.txt** - SLURM configuration tips and best practices.
+- **script-comparison.md** - Comparison of run script configurations.
 
 ## Usage
 
 ### Quick Start
+1. **Setup Environment**:
+   ```bash
+   bash setup-conda-env.sh  # Creates .conda_env
+   source runme.sh          # Sets SLURM account (create if needed: export SLURM_ACCOUNT=your_account)
+   ```
 
-To run the entire pipeline with optimized performance:
+2. **Run Pipeline** (submit via SLURM):
+   ```bash
+   # Recommended: Fast parallel mode
+   sbatch run-fast-parallel.sh
 
+   # Or ultra-parallel for max speed (higher resource use)
+   sbatch run-ultra-parallel.sh
+
+   # Disk-safe mode (lower concurrency)
+   sbatch run-disk-safe-parallel.sh
+
+   # Dry-run test (no submission)
+   sbatch run-test-config.sh
+   ```
+
+   Each launcher runs `slurm-sequential-runner.py` with tailored args, e.g.:
+   ```bash
+   ./.conda_env/bin/python slurm-sequential-runner.py \
+     --template-file job-template.sh \
+     --crawl-dates-file crawl_data.txt \
+     --partition compute \
+     --time 168 \                # 7 days
+     --mem 2G \
+     --cpus 2 \
+     --segments-per-task 25 \    # Files per array task
+     --throttle 50 \             # Max concurrent tasks
+     --job-prefix crawl_job_fast
+   ```
+
+### Monitoring & Management
+While jobs run (parent launcher + child arrays):
 ```bash
-# Set your SLURM account (required for compute partition access)
-source runme.sh
+# Monitor running jobs (parent and children)
+./monitor-job.sh
 
-# High-performance mode (50 concurrent tasks)
-sbatch run-fast-parallel.sh
-
-# Maximum throughput mode (100 concurrent tasks)  
-sbatch run-ultra-parallel.sh
-
-# Test configuration without submitting jobs
-./test-config.sh
-```
-
-### Monitoring and Management
-
-Track your job progress and output files with built-in monitoring tools:
-
-```bash
-# Check job status and progress (for running jobs)
-./job-status.sh
-
-# Analyze output files and storage usage
-./file-analysis.sh
-
-# Quick summary of key metrics
-./file-summary.sh
-
-# Combined monitoring
-./job-status.sh && echo "" && ./file-summary.sh
+# SLURM commands for details
+squeue -u $USER  # All jobs
+squeue -u $USER | grep crawl_job  # Child jobs
+sinfo -p compute  # Partition status
 ```
 
 ### Post-Completion Analysis
-
-Once your jobs complete, use these tools to analyze performance and investigate issues:
-
+After the sequential runner finishes all dates:
 ```bash
-# Comprehensive job completion review
-./job-review.sh
+# Analyze completed jobs (success, runtime, failures)
+./job-analyzer.sh
 
-# Analyze SLURM logs for errors and patterns
-./log-analysis.sh
-
-# Investigate specific failure causes (exit codes, error patterns)
-./analyze-failures.sh
-
-# Combined post-completion analysis
-./job-review.sh && echo "" && ./log-analysis.sh
+# Check logs/output
+sacct -j <JOB_ID> --format=JobID,State,ExitCode,MaxRSS,Elapsed  # Parent job
+ls *_%j.out *_%j.err  # Child job logs
 ```
 
-**Post-Completion Analysis Features:**
-- 📊 **Success/failure statistics** with completion percentages
-- ⏱️ **Runtime analysis** including min/max/average task durations
-- 💾 **Memory usage efficiency** and resource utilization metrics
-- 🖥️ **Node distribution analysis** showing cluster usage patterns
-- 🚨 **Failed job identification** with specific exit codes and error patterns
-- 🔍 **Log file analysis** for error detection and troubleshooting
-- 🎯 **Performance recommendations** based on actual job metrics
-- 📈 **Comparative analysis** against expected vs actual performance
+**Analysis Features** (via `job-analyzer.sh`):
+- 📊 Success/failure rates and exit codes.
+- ⏱️ Runtime stats (min/max/avg per task/date).
+- 💾 Resource utilization (memory, CPU).
+- 🚨 Error pattern detection (using `error_patterns.txt`).
+- 📈 Performance insights and tuning recommendations.
 
-**Monitoring Features:**
-- 📊 **Real-time progress tracking** with completion percentages
-- 🚀 **Performance metrics** including task completion rates
-- 🖥️ **Resource utilization** across compute nodes
-- ⏰ **Estimated completion times** based on current throughput
-- 📁 **File generation analysis** with sizes and recent activity
-- 💾 **Storage monitoring** to track disk usage
+## Workflow Explanation
+1. Launcher script (e.g., `run-fast-parallel.sh`) runs `slurm-sequential-runner.py`.
+2. The Python runner loads `crawl_data.txt` and, for each date:
+   - Calculates array size: `n_files / segments_per_task`.
+   - Submits a SLURM array job (e.g., `0-3199%50` for ~80k files, 25 per task, 50 concurrent).
+   - Uses `job-template.sh` to generate the job script, which activates `.conda_env` and calls `common-crawl-processor.py --task-id $SLURM_ARRAY_TASK_ID`.
+   - Waits (polls `squeue`) for the array to complete before next date.
+3. Each array task processes its file segments: downloads WET files (from `wet.paths`), filters (using `BristolPostcodeLookup.parquet`), outputs Parquet/CSV.
 
-### Performance Optimization Features
+Processed files save to `./output/<date>/` (configurable in `common-crawl-processor.py`).
 
-**Recent improvements (September 2025):**
-- ✅ **Configurable Throttle Limits**: Added `--throttle` parameter to control concurrent array tasks
-- ✅ **Increased Default Parallelism**: Raised default from 10 to 50 concurrent tasks (5x improvement)
-- ✅ **Ultra-High Throughput Mode**: Support for 100+ concurrent tasks on large clusters
-- ✅ **Proper Account Management**: Environment variable support for SLURM account configuration
-- ✅ **Extended Time Limits**: 7-day (168h) timeout prevents job failures on large datasets
-- ✅ **Optimized Resource Allocation**: 2G memory, 2 CPUs per task for balanced performance
-- ✅ **Dry-Run Validation**: Test configurations before submitting production jobs
+## Requirements
+- SLURM cluster access.
+- Bash, Python 3.x (via `.conda_env`: pandas, pyarrow, requests, etc.—installed by `setup-conda-env.sh`).
+- Git LFS for large files (setup below).
 
-**Performance Comparison:**
-- **Before**: 10 concurrent tasks maximum, 24h timeout (caused failures)
-- **After**: 50-100 concurrent tasks, 7-day timeout, 5-10x faster processing
-
-### Workflow Explanation
-
-1. **job-runner.sh** configures the Miniconda environment and calls `slurm-sequential-runner.py`
-2. **slurm-sequential-runner.py** reads crawl dates from `crawl_data.txt` and creates a Slurm job for each date
-3. Each job uses **job-template.sh** to configure the environment and run **common-crawl-processor.py**
-4. **common-crawl-processor.py** downloads and processes the Common Crawl data for its assigned date
-
-### Requirements
-
-- Slurm cluster access
-- Miniconda environment (configured in the scripts)
-- Python 3.x with required packages (listed in environment setup)
-
-**Note**: The project has migrated from Micromamba to Miniconda3 due to segmentation fault issues encountered with Micromamba in the HPC environment. All scripts now use the more stable Miniconda3 installation.
+Note: Uses stable conda env in `.conda_env` (no Micromamba due to HPC compatibility issues).
 
 ## Configuration
+Edit these for customization:
+- **crawl_data.txt**: Add/remove dates and file counts.
+- **job-template.sh**: Tweak SLURM params or env setup.
+- **common-crawl-processor.py**: Adjust filtering logic or output paths.
+- **run-*.sh**: Modify Python args for your needs (e.g., `--throttle 30` for medium clusters).
 
-### SLURM Performance Tuning
+### SLURM Tuning
+- **Time**: `--time 168` (7 days) for large dates; check partition max with `sinfo`.
+- **Parallelism**: Lower `--segments-per-task` = more tasks (higher parallelism); use `--throttle` to limit concurrency.
+- **Account**: Set in `runme.sh` and source before `sbatch`.
 
-The `slurm-sequential-runner.py` script now supports extensive configuration options:
+## Performance Optimization Features
+- **Configurable Parallelism**: `--throttle` controls concurrent array tasks (default 50; up to 100+ on large clusters).
+- **Sequential Safety**: Processes dates one-by-one to avoid overload, but parallel within dates via arrays.
+- **Extended Timeouts**: 7-day limits prevent failures on big crawls.
+- **Resource Balance**: 2G mem, 2 CPUs per task; low overhead for launcher.
+- **Dry-Run**: Test with `run-test-config.sh`—generates scripts in `./generated_scripts/`.
+- **Improvements**: 5-10x faster than original sequential (via arrays + throttling); optimized for compute partitions.
 
-```bash
-python slurm-sequential-runner.py \
-  --template-file job-template.sh \
-  --crawl-dates-file crawl_data.txt \
-  --partition compute \
-  --time 168 \                      # Time limit in hours (168h = 7 days)
-  --mem 2G \                        # Memory per task  
-  --cpus 2 \                        # CPUs per task
-  --segments-per-task 25 \          # Files per task (lower = more parallelism)
-  --throttle 50 \                   # Max concurrent array tasks
-  --job-prefix crawl_job \          # Job name prefix
-  --dry-run                         # Test mode (don't submit jobs)
-```
-
-### Account Configuration
-
-Create a `runme.sh` file to set your SLURM account:
-
-```bash
-export SLURM_ACCOUNT=your_account_name
-export SBATCH_ACCOUNT=your_account_name
-```
-
-Then source it before submitting jobs:
-```bash
-source runme.sh
-```
-
-Edit the following files to customize your processing:
-
-- **job-template.sh**: Modify resource allocations and environment setup
-- **crawl_data.txt**: Add or remove Common Crawl dates to process
-- **common-crawl-processor.py**: Adjust filtering parameters as needed
-
-## Output
-
-Processed data will be saved in the output directory specified in the scripts, with one subdirectory per crawl date.
-
-# Understanding the Transition to SLURM Array Jobs
-
-## The Original Approach
-The original script used these parameters:
-- `crawlDate="202350"` - Identifies the data crawl (2023 week 50)
-- `n=90000` - Total number of .wet files to process
-- `c=10` - Number of chunks to manually divide the work into
-- `account="blah"` - SLURM account for resource charging
-
-With this approach:
-- The script manually divided 90,000 files into 10 chunks
-- Each chunk would process 9,000 files
-- Processing was likely sequential within each chunk
-- The work couldn't be easily distributed across multiple nodes
-
-## The New SLURM Array Approach
-The new script is designed to work with SLURM's array job functionality:
-
-### Key Parameters
-- `--crawl-date` - Specifies which crawl to process (e.g., 202350)
-- `--segments-per-task` - How many files each array task should process
-- `--task-id` - Automatically provided by SLURM as `$SLURM_ARRAY_TASK_ID`
-
-### How It Works
-1. The script is submitted as a SLURM array job
-2. SLURM creates multiple independent tasks and assigns each a unique ID
-3. Each task calculates which segments to process based on its ID:
-   ```
-   start_segment = task_id * segments_per_task
-   end_segment = start_segment + segments_per_task
-   ```
-4. Tasks run in parallel across the cluster
-
-### Example SLURM Job Submission
-```bash
-#!/bin/bash
-#SBATCH --account=math026082
-#SBATCH --array=0-899%10       # 900 tasks, max 10 running at once
-#SBATCH --job-name=crawl_process
-
-python common-crawl-processor.py \
-  --crawl-date 202350 \
-  --task-id $SLURM_ARRAY_TASK_ID \
-  --segments-per-task 100
-```
-
-### Parameter Equivalence
-- For 90,000 files with 100 segments per task:
-  - Need 900 tasks (90,000 ÷ 100)
-  - SLURM array range: 0-899
-- For 90,000 files with 10 segments per task:
-  - Need 9,000 tasks (90,000 ÷ 10)
-  - SLURM array range: 0-8999
-
-The `%10` in `--array=0-899%10` means run at most 10 tasks simultaneously.
-
-## Advantages of the SLURM Array Approach
-
-1. **Automatic Distribution**: SLURM distributes tasks across available nodes
-2. **Better Fault Tolerance**: If a task fails, only its segments need to be reprocessed
-3. **Improved Resource Utilization**: The scheduler optimizes node usage
-4. **Scalability**: Easy to scale by changing array size or segments per task
-5. **Built-in Management Tools**: Monitor progress with SLURM commands
-6. **Concurrency Control**: Throttle concurrent tasks to avoid overwhelming resources
-
-The new approach leverages SLURM's built-in capabilities rather than implementing parallel processing manually, resulting in better performance, reliability, and resource utilization across the entire computing cluster.
+**Performance Comparison**:
+- **Sequential (old)**: 10 tasks max, 24h timeout → frequent failures.
+- **Array (now)**: 50-100 concurrent, 7-day timeout → full dataset completion.
 
 ## Best Practices
+1. **Account Setup**: Use `runme.sh` for portability.
+2. **Throttle Tuning**: 10-20 for small clusters; 50+ for large.
+3. **Timeouts**: 24h for tests; 168h for production.
+4. **Balance Workload**: `--segments-per-task 10-50` (trade parallelism vs. overhead).
+5. **Test First**: Always dry-run.
+6. **Parquet Output**: Half the size of CSV; better for large data.
+7. **SLURM Arrays**: Use `%throttle` (e.g., `--array=0-899%50`) for control.
+8. **Monitor Resources**: `sacct` for usage; adjust mem/CPUs if needed.
+9. **Git Hygiene**: `.gitignore` excludes outputs/logs; commit only templates/scripts.
 
-1. **Use Environment Variables for Account**: Instead of hardcoding the account name, use the `$SBATCH_ACCOUNT` environment variable. This makes scripts more portable and secure.
-
-2. **Optimize Throttle Settings**: Control concurrent task limits based on cluster size:
-   - **Small clusters**: `--throttle 10-20` 
-   - **Medium clusters**: `--throttle 50` (default)
-   - **Large clusters**: `--throttle 100+`
-
-3. **Configure Appropriate Timeouts**: Use extended time limits for large datasets:
-   - **Short jobs**: `--time 24` (24 hours)
-   - **Medium jobs**: `--time 72` (3 days) 
-   - **Large datasets**: `--time 168` (7 days)
-
-4. **Balance segments-per-task**: Optimize the trade-off between parallelism and overhead:
-   - **More parallelism**: `--segments-per-task 10-25` (more tasks, faster completion)
-   - **Less overhead**: `--segments-per-task 50-100` (fewer tasks, reduced scheduling load)
-
-5. **Test Before Production**: Always validate configurations with dry-run mode:
-   ```bash
-   ./test-config.sh  # Generates scripts without submitting
-   ```
-
-6. **Use Parquet Output Format**: Parquet files are approximately half the size of equivalent CSV files, with better compression and query performance.
-
-7. **Leverage SLURM Arrays**: Distribute computation across multiple nodes by using SLURM array jobs. Control parallel execution with the `%` throttling parameter (e.g., `--array=0-899%50`).
-
-8. **Monitor Resource Usage**: Check job efficiency and adjust resource requests:
-   ```bash
-   squeue -u $USER                    # Check running jobs
-   sacct -j JOBID --format=JobID,MaxRSS,MaxVMSize,CPUTime  # Check resource usage
-   ```
-
-9. **Repository Management**: Don't commit generated code to Git. Instead:
-   - Include templates and generation scripts in the repository
-   - Document the generation process in the README
-   - Add generated files to .gitignore
-
-By following these practices, you'll create a more efficient, maintainable, and scalable pipeline for processing Common Crawl data across a computing cluster.
+## Understanding the Transition to SLURM Array Jobs
+(See original README for detailed equivalence to old manual chunking—unchanged, but now fully integrated via `slurm-sequential-runner.py`.)
 
 ## Troubleshooting
+### Common Issues
+**Parent Job Times Out**: Launcher (e.g., `run-fast-parallel.sh`) needs `#SBATCH --time=168:00:00` for full sequential wait. Add to scripts if missing.
 
-### Common Issues and Solutions
+**Child Arrays Stop Early**: Due to parent kill; ensure parent time > total estimated runtime (~1-2 days per date × num_dates).
 
-**Job stays in PENDING state with "PartitionConfig" reason:**
-- **Cause**: Default account is denied access to compute partition
-- **Solution**: Set proper account with `source runme.sh` before submitting
+**PENDING "PartitionConfig"**: Source `runme.sh` for account.
 
-**Jobs timeout after 24 hours:**
-- **Cause**: Default time limit too short for large datasets  
-- **Solution**: Use `--time 168` for 7-day limit
+**Low Concurrency**: Increase `--throttle`; check `sinfo` for resources.
 
-**Low parallelism (only 10 tasks running):**
-- **Cause**: Default throttle limit of 10 concurrent tasks
-- **Solution**: Use `--throttle 50` or higher based on cluster capacity
+**Exit Code 120**: App errors (e.g., download fails)—use `./job-analyzer.sh` and `error_patterns.txt`.
 
-**Exit code 120 failures in completed jobs:**
-- **Cause**: Application-specific processing errors (not SLURM issues)
-- **Investigation**: Use `./analyze-failures.sh` to identify error patterns
-- **Common causes**: Missing/corrupted crawl data, network timeouts, data format issues
+**Array Not Starting**: Normal queuing; SLURM throttles via `%`.
 
-**Git LFS errors during push:**
-- **Cause**: Git LFS not installed but repository configured for it
-- **Solution**: Add miniconda git to PATH: `export PATH="./miniconda3/bin:$PATH"`
-
-**Micromamba segmentation faults:**
-- **Cause**: Micromamba instability in HPC environments
-- **Solution**: Use Miniconda3 instead - more stable and reliable for cluster computing
-- **Migration**: Update scripts to use `./miniconda3/bin/python` instead of micromamba commands
-
-**Array jobs not starting:**
-- **Cause**: JobArrayTaskLimit reached
-- **Solution**: This is normal - SLURM queues tasks and starts them as resources become available
-
-### Performance Monitoring
-
+### Monitoring Commands
 ```bash
-# Check job status (running jobs)
-squeue -u $USER
-
-# Monitor resource usage (completed jobs)
-sacct -j JOBID --format=JobID,MaxRSS,MaxVMSize,CPUTime,State
-
-# Comprehensive post-completion analysis
-./job-review.sh
-
-# Check partition availability  
-sinfo -p compute
-
-# View detailed job information
-scontrol show job JOBID
-
-# Analyze error patterns in failed jobs
-./analyze-failures.sh
+squeue -u $USER  # Running jobs
+sacct -j <ID> --format=JobID,State,Elapsed,MaxRSS  # Completed
+./monitor-job.sh  # Custom progress
+./job-analyzer.sh  # Analysis
+scontrol show job <ID>  # Details
 ```
 
-### Job Completion Analysis
-
-After your jobs complete, use the analysis tools to understand performance:
-
-```bash
-# Overall job performance and statistics
-./job-review.sh
-
-# Error analysis and troubleshooting
-./log-analysis.sh
-
-# Specific failure investigation
-./analyze-failures.sh
-
-# Example output insights:
-# ✅ 65.8% success rate (5,058/7,680 tasks)
-# ⏱️ Average runtime: 19 minutes per task
-# 💾 Memory efficiency: 5.9% (120MB used of 2GB allocated)
-# 🎯 No timeout failures (7-day limit successful)
-```
+### Job Completion Insights (from `job-analyzer.sh`)
+- ✅ Success rate (e.g., 95% tasks complete).
+- ⏱️ Avg runtime per date.
+- 🚨 Failures by code/pattern.
+- 🎯 Recommendations (e.g., "Increase throttle to 75").
 
 ## Git LFS Setup and Data Download
+Uses Git LFS for large files (e.g., `.parquet`).
 
-This repository uses Git LFS (Large File Storage) for managing large data files like parquet files and datasets.
-
-### Installing Git LFS
-
-If you don't have Git LFS installed, you can use the version included with Miniconda3:
-
+### Install/Use
 ```bash
-# Add miniconda3 git (includes LFS support) to your PATH
-export PATH="./miniconda3/bin:$PATH"
-
-# Or install git-lfs separately if needed
-# conda install git-lfs
-# git lfs install
+git lfs install  # If needed
+git lfs pull     # Download all
+git lfs pull --include="*.parquet"  # Specific
 ```
 
-### Downloading LFS Content
-
-After cloning the repository, download the large files:
-
+### Check
 ```bash
-# Download all LFS files
-git lfs pull
-
-# Or download specific files
-git lfs pull --include="*.parquet"
-git lfs pull --include="wet.paths"
-```
-
-### Checking LFS Status
-
-```bash
-# View which files are stored in LFS
 git lfs ls-files
-
-# Check LFS tracking patterns
 git lfs track
-
-# View LFS file info
-git lfs pointer --file=BristolPostcodeLookup.parquet
 ```
 
-### Working with LFS Files
-
-When you modify large data files, Git LFS automatically handles them:
-
-```bash
-# Add and commit LFS files normally
-git add BristolPostcodeLookup.parquet
-git commit -m "Update lookup data"
-git push
-```
-
-**Note**: Large files (>100MB) are automatically tracked by LFS. The `.gitattributes` file defines which file types use LFS storage.
+Modify/commit as usual: `git add <file> && git commit && git push`. `.gitattributes` auto-tracks large files.
