@@ -8,13 +8,11 @@
 # Safe globs: Expand to empty if no matches (replaces 2>/dev/null for silence)
 shopt -s nullglob
 
+
 source ./runme.sh  # Load environment variables
 
-# Ensure JOB_WORKDIR is set (fallback to current dir)
-if [[ -z "${JOB_WORKDIR:-}" ]]; then
-    echo "Note: JOB_WORKDIR not set. Using current dir for analysis."
-    JOB_WORKDIR="."
-fi
+# Use WORKING_DIR from environment for analysis
+JOB_WORKDIR="${WORKING_DIR}"
 
 set -euo pipefail  # Exit on error, undefined vars, pipe failures
 
@@ -28,8 +26,8 @@ RESET=$(tput sgr0 2>/dev/null || true; echo -n ${RESET:-})
 # Defaults
 JOB_PREFIX="${1:-crawl_job}"
 DRY_RUN="${2:-}"
-ANALYSIS_DIR="${JOB_WORKDIR}/output"  # Default to WORKING_DIR/output for dual-dir
-REPORT_FILE="${JOB_WORKDIR}/analysis_report_${JOB_PREFIX}.txt"  # Save report in WORKING_DIR
+ANALYSIS_DIR="${WORKING_DIR}/output"  # Parquet and wet.gz files location
+REPORT_FILE="analysis_report_${JOB_PREFIX}.txt"
 ERROR_THRESHOLD=5  # Warn if errors > this
 CONDA_ENV="./.conda_env"  # Path to env for Parquet analysis
 
@@ -58,6 +56,7 @@ echo ""
     echo ""
 } > "$REPORT_FILE"
 
+
 # 1. ERROR AND FAILURE ANALYSIS (*.err and *.log)
 echo "${GREEN}1. Error and Failure Summary${RESET}"
 echo "-----------------------------"
@@ -65,21 +64,21 @@ ERROR_COUNT=0
 WARNING_COUNT=0
 FAILURE_DETAILS=""
 
-# Scan *.err files (nullglob makes empty array if no files)
-ERR_FILES=("$ANALYSIS_DIR"/*_${JOB_PREFIX}*.err "$ANALYSIS_DIR"/*.err)
+# Scan *.err files in WORKING_DIR
+ERR_FILES=("${WORKING_DIR}"/*_${JOB_PREFIX}*.err "${WORKING_DIR}"/*.err)
 for file in "${ERR_FILES[@]}"; do
     if [[ -f "$file" ]]; then
         ERRORS=$(grep -i "error\|failed\|exception\|timeout" "$file" | wc -l)
         WARNINGS=$(grep -i "warning\|low\|insufficient" "$file" | wc -l)
         ERROR_COUNT=$((ERROR_COUNT + ERRORS))
         WARNING_COUNT=$((WARNING_COUNT + WARNINGS))
-        FAILURE_DETAILS+=$(grep -i "error\|failed" "$file" | head -3)  # Top 3 details
+        FAILURE_DETAILS+=$(grep -i "error\|failed" "$file" | head -3)
         FAILURE_DETAILS+="\nFrom file: $file\n\n"
     fi
 done
 
-# Scan *.log files for failures
-LOG_FILES=("$ANALYSIS_DIR"/*_${JOB_PREFIX}*.log "$ANALYSIS_DIR"/*.log)
+# Scan *.log files in WORKING_DIR
+LOG_FILES=("${WORKING_DIR}"/*_${JOB_PREFIX}*.log "${WORKING_DIR}"/*.log)
 for file in "${LOG_FILES[@]}"; do
     if [[ -f "$file" ]]; then
         ERRORS=$(grep -i "error\|failed to download\|error processing|logging.error" "$file" | wc -l)
@@ -121,7 +120,7 @@ AVG_TIME_PER_SEG=0
 LOG_DETAILS=""
 
 # Capture globs in temp array for safe iteration
-TEMP_FILES=("${LOG_FILES[@]}" "$ANALYSIS_DIR"/*_${JOB_PREFIX}*.out "$ANALYSIS_DIR"/*.out)
+TEMP_FILES=("${LOG_FILES[@]}" "${WORKING_DIR}"/*_${JOB_PREFIX}*.out "${WORKING_DIR}"/*.out)
 for file in "${TEMP_FILES[@]}"; do
     if [[ -f "$file" ]]; then
         # Count successful segments (e.g., "Completed processing segment X: Y records")
@@ -183,7 +182,7 @@ UNIQUE_POSTCODES=0
 QUALITY_NOTES=""
 PCT_WITH_PC="0"
 
-PARQUET_FILES=("$ANALYSIS_DIR"/crawldata*.parquet)
+PARQUET_FILES=("${WORKING_DIR}/output"/crawldata*.parquet)
 
 if [[ ${#PARQUET_FILES[@]} -eq 0 ]]; then
     echo "${YELLOW}No Parquet files found. Skipping analysis.${RESET}"
