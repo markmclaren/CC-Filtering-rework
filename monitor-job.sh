@@ -25,8 +25,15 @@ BLUE=$(tput setaf 4)
 RESET=$(tput sgr0)
 
 # Defaults
-JOB_PREFIX="${1:-crawl_job}"  # Default prefix if none provided
-DRY_RUN="${2:-}"  # --dry-run flag for testing
+# Accept optional job id as first arg; --dry-run can be first or second arg
+JOB_ID=""
+DRY_RUN=""
+if [[ "${1:-}" == "--dry-run" || "${2:-}" == "--dry-run" ]]; then
+    DRY_RUN="--dry-run"
+fi
+if [[ "${1:-}" != "--dry-run" && -n "${1:-}" ]]; then
+    JOB_ID="$1"
+fi
 OUTPUT_DIR="${WORKING_DIR}/output"  # Parquet and wet.gz files location
 WET_PATHS_PATTERN="wet.paths"  # File listing total segments
 CRAWL_DATA_FILE="crawl_data.txt"  # List of crawl dates
@@ -35,12 +42,29 @@ DISK_THRESHOLD_GB=10  # Warn if free < this
 OUTPUT_SIZE_THRESHOLD_GB=500  # Warn if total output > this
 TIME_WARN_PCT=80  # Warn if elapsed > this % of limit
 
+# Try to auto-detect the most recent job ID for the user if not provided
+if [[ -z "$JOB_ID" ]] && command -v squeue >/dev/null 2>&1; then
+    JOB_ID=$(squeue -u "$USER" --noheader -o "%A %j %T" | awk '{print $1}' | tail -n1 || true)
+fi
+# Fallback to sacct (recent historical jobs) if still empty
+if [[ -z "$JOB_ID" ]] && command -v sacct >/dev/null 2>&1; then
+    JOB_ID=$(sacct -u "$USER" --format=JobID%20,JobName%40 --noheader | awk '{print $1}' | tail -n1 || true)
+fi
+
+if [[ -n "$JOB_ID" ]]; then
+    echo "Using job id: $JOB_ID"
+    JOB_SELECTOR_ID="$JOB_ID"
+else
+    echo "No job id provided or auto-detected; operating on all jobs for user $USER."
+    JOB_SELECTOR_ID=""
+fi
+
 if [[ "$DRY_RUN" == "--dry-run" ]]; then
     echo "${YELLOW}Dry-run mode: Simulating without real checks.${RESET}"
     exit 0
 fi
 
-echo "${BLUE}=== Job Monitoring Report for Prefix: $JOB_PREFIX ===${RESET}"
+echo "${BLUE}=== Job Monitoring Report ${JOB_ID:+for Job ID: $JOB_ID} ===${RESET}"
 echo "Report generated: $(date)"
 echo ""
 
@@ -48,9 +72,16 @@ echo ""
 echo "${GREEN}1. Current Slurm Jobs${RESET}"
 echo "-------------------------"
 if command -v squeue >/dev/null 2>&1; then
-    RUNNING=$(squeue -A "$SLURM_ACCOUNT" -u $USER -j "*${JOB_PREFIX}*" --format="%i %P %j %T %l %D" --state=RUNNING | wc -l)
-    PENDING=$(squeue -A "$SLURM_ACCOUNT" -u $USER -j "*${JOB_PREFIX}*" --format="%i %P %j %T %l %D" --state=PENDING | wc -l)
-    COMPLETED=$(sacct -A "$SLURM_ACCOUNT" -u $USER -j "*${JOB_PREFIX}*" --format="JobID,JobName,State,Elapsed,MaxRSS" --state=COMPLETED | tail -n +2 | wc -l)
+    if [[ -n "${JOB_SELECTOR_ID:-}" ]]; then
+        RUNNING=$(squeue -A "$SLURM_ACCOUNT" -u $USER -j "$JOB_SELECTOR_ID" --format="%i %P %j %T %l %D" --state=RUNNING | wc -l)
+        PENDING=$(squeue -A "$SLURM_ACCOUNT" -u $USER -j "$JOB_SELECTOR_ID" --format="%i %P %j %T %l %D" --state=PENDING | wc -l)
+        COMPLETED=$(sacct -A "$SLURM_ACCOUNT" -u $USER -j "$JOB_SELECTOR_ID" --format="JobID,JobName,State,Elapsed,MaxRSS" --state=COMPLETED | tail -n +2 | wc -l || echo 0)
+    else
+        # No specific job id: list all jobs for user
+        RUNNING=$(squeue -A "$SLURM_ACCOUNT" -u $USER --format="%i %P %j %T %l %D" --state=RUNNING | wc -l)
+        PENDING=$(squeue -A "$SLURM_ACCOUNT" -u $USER --format="%i %P %j %T %l %D" --state=PENDING | wc -l)
+        COMPLETED=$(sacct -A "$SLURM_ACCOUNT" -u $USER --format="JobID,JobName,State,Elapsed,MaxRSS" --state=COMPLETED | tail -n +2 | wc -l || echo 0)
+    fi
 
     echo "Running jobs: $((RUNNING - 1))  (includes header row)"
     echo "Pending jobs: $((PENDING - 1))"
@@ -59,7 +90,11 @@ if command -v squeue >/dev/null 2>&1; then
     # Detailed running jobs
     echo ""
     echo "Running/Pending Details:"
-    squeue -A "$SLURM_ACCOUNT" -u $USER -j "*${JOB_PREFIX}*" --format="%i %P %j %T %l %M %D %R" --states=RUNNING,PENDING || echo "No matching jobs found."
+    if [[ -n "${JOB_SELECTOR_ID:-}" ]]; then
+        squeue -A "$SLURM_ACCOUNT" -u $USER -j "$JOB_SELECTOR_ID" --format="%i %P %j %T %l %M %D %R" --states=RUNNING,PENDING || echo "No matching jobs found."
+    else
+        squeue -A "$SLURM_ACCOUNT" -u $USER --format="%i %P %j %T %l %M %D %R" --states=RUNNING,PENDING || echo "No matching jobs found."
+    fi
 else
     echo "${RED}Warning: squeue not available (not on Slurm cluster?).${RESET}"
 fi
@@ -90,8 +125,14 @@ for PARQUET in "$OUTPUT_DIR"/crawldata*.parquet; do
     fi
 done
 
-PERCENT_COMPLETE=$(( (PROCESSED_SEGMENTS * 100) / TOTAL_SEGMENTS ))
-REMAINING_SEGMENTS=$((TOTAL_SEGMENTS - PROCESSED_SEGMENTS))
+# Protect against division by zero when no segments are listed
+if [[ $TOTAL_SEGMENTS -le 0 ]]; then
+    PERCENT_COMPLETE=0
+    REMAINING_SEGMENTS=$TOTAL_SEGMENTS  # keep semantics (usually 0)
+else
+    PERCENT_COMPLETE=$(( (PROCESSED_SEGMENTS * 100) / TOTAL_SEGMENTS ))
+    REMAINING_SEGMENTS=$((TOTAL_SEGMENTS - PROCESSED_SEGMENTS))
+fi
 
 echo "Total segments to process: $TOTAL_SEGMENTS (across ${#CRAWL_DATES[@]} crawl dates)"
 echo "Processed segments so far: $PROCESSED_SEGMENTS"
@@ -118,22 +159,74 @@ echo ""
 # 3. TIME CONSTRAINTS
 echo "${GREEN}3. Time Constraints${RESET}"
 echo "--------------------"
-# Get time limit from running jobs (first one)
-TIME_LIMIT=$(squeue -A "$SLURM_ACCOUNT" -u $USER -j "*${JOB_PREFIX}*" --format="%l" --states=RUNNING | head -n2 | tail -1 | cut -d: -f1)  # e.g., "14-00:00:00" -> hours
-if [[ -n "$TIME_LIMIT" ]]; then
-    TIME_HRS=${TIME_LIMIT%%:*}  # Extract hours
-    ELAPSED=$(squeue -A "$SLURM_ACCOUNT" -u $USER -j "*${JOB_PREFIX}*" --format="%D" --states=RUNNING | head -n2 | tail -1 | cut -d: -f1)  # Days elapsed
-    ELAPSED_HRS=$((ELAPSED * 24))
-    PCT_USED=$(( (ELAPSED_HRS * 100) / TIME_HRS ))
-    
-    echo "Job time limit: ~${TIME_HRS} hours"
-    echo "Elapsed time: ~${ELAPSED_HRS} hours (${PCT_USED}%)"
-    
-    if [[ $PCT_USED -gt $TIME_WARN_PCT ]]; then
-        echo "${RED}WARNING: Approaching time limit! Consider extending or checking for issues.${RESET}"
+
+# Convert Slurm time strings (DD-HH:MM:SS, HH:MM:SS, MM:SS, UNLIMITED) to seconds
+slurm_time_to_seconds() {
+    local t="$1"
+    [[ -z "$t" || "$t" == "UNLIMITED" ]] && echo 0 && return
+    if [[ "$t" =~ ^([0-9]+)-([0-9]{1,2}):([0-9]{2}):([0-9]{2})$ ]]; then
+        local days=${BASH_REMATCH[1]}
+        local hrs=${BASH_REMATCH[2]}
+        local mins=${BASH_REMATCH[3]}
+        local secs=${BASH_REMATCH[4]}
+        echo $(( (days*24 + hrs)*3600 + mins*60 + secs ))
+        return
+    fi
+    if [[ "$t" =~ ^([0-9]{1,2}):([0-9]{2}):([0-9]{2})$ ]]; then
+        local hrs=${BASH_REMATCH[1]}
+        local mins=${BASH_REMATCH[2]}
+        local secs=${BASH_REMATCH[3]}
+        echo $(( hrs*3600 + mins*60 + secs ))
+        return
+    fi
+    if [[ "$t" =~ ^([0-9]{1,2}):([0-9]{2})$ ]]; then
+        local mins=${BASH_REMATCH[1]}
+        local secs=${BASH_REMATCH[2]}
+        echo $(( mins*60 + secs ))
+        return
+    fi
+    # fallback: try integer seconds
+    echo "$t"
+}
+
+# Query squeue for elapsed and limit (use job id if set, else first running job for user)
+if command -v squeue >/dev/null 2>&1; then
+    if [[ -n "${JOB_SELECTOR_ID:-}" ]]; then
+        line=$(squeue -A "$SLURM_ACCOUNT" -u $USER -j "$JOB_SELECTOR_ID" -o "%M %l" --noheader --states=RUNNING | head -n1 || true)
+    else
+        line=$(squeue -A "$SLURM_ACCOUNT" -u $USER -o "%M %l" --noheader --states=RUNNING | head -n1 || true)
+    fi
+
+    if [[ -n "$line" ]]; then
+        elapsed_str=$(awk '{print $1}' <<<"$line")
+        limit_str=$(awk '{print $2}' <<<"$line")
+        elapsed_s=$(slurm_time_to_seconds "$elapsed_str")
+        limit_s=$(slurm_time_to_seconds "$limit_str")
+
+        limit_hrs=$(( limit_s / 3600 ))
+        elapsed_hrs=$(( elapsed_s / 3600 ))
+
+        if [[ $limit_s -le 0 ]]; then
+            PCT_USED=0
+        else
+            PCT_USED=$(( (elapsed_s * 100) / limit_s ))
+        fi
+
+        echo "Job time limit: ~${limit_hrs} hours"
+        echo "Elapsed time: ~${elapsed_hrs} hours (${PCT_USED}%)"
+
+        if [[ $PCT_USED -gt $TIME_WARN_PCT ]]; then
+            echo "${RED}WARNING: Approaching time limit! Consider extending or checking for issues.${RESET}"
+        fi
+    else
+        if [[ -n "${JOB_SELECTOR_ID:-}" ]]; then
+            echo "No running job found with id '$JOB_SELECTOR_ID'."
+        else
+            echo "No running jobs to report time limits."
+        fi
     fi
 else
-    echo "No running jobs with prefix '$JOB_PREFIX'."
+    echo "${RED}squeue not available; cannot determine time constraints.${RESET}"
 fi
 
 # Project deadline (optional env var)
