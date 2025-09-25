@@ -33,7 +33,6 @@ These launcher scripts configure and submit the sequential runner for different 
 - **BristolPostcodeLookup.parquet** - Lookup table for Bristol postcodes used in data filtering.
 - **crawl_data.txt** - List of crawl dates and file counts (format: `date num_files`, e.g., `202104 79840`).
 - **wet.paths** - Paths to Common Crawl WET files.
-- **error_patterns.txt** - Common error patterns for analysis.
 - **scripts.txt** - Quick reference to script purposes.
 - **slurm-config-guide.txt** - SLURM configuration tips and best practices.
 - **script-comparison.md** - Comparison of run script configurations.
@@ -103,7 +102,6 @@ ls *_%j.out *_%j.err  # Child job logs
 - 📊 Success/failure rates and exit codes.
 - ⏱️ Runtime stats (min/max/avg per task/date).
 - 💾 Resource utilization (memory, CPU).
-- 🚨 Error pattern detection (using `error_patterns.txt`).
 - 📈 Performance insights and tuning recommendations.
 
 ## Workflow Explanation
@@ -172,7 +170,7 @@ Edit these for customization:
 
 **Low Concurrency**: Increase `--throttle`; check `sinfo` for resources.
 
-**Exit Code 120**: App errors (e.g., download fails)—use `./job-analyzer.sh` and `error_patterns.txt`.
+**Exit Code 120**: App errors (e.g., download fails)—use `./job-analyzer.sh`.
 
 **Array Not Starting**: Normal queuing; SLURM throttles via `%`.
 
