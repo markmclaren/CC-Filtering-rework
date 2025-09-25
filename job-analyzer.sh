@@ -10,13 +10,6 @@ shopt -s nullglob
 
 source ./runme.sh  # Load environment variables
 
-# Source config for dual-dir setup (JOB_WORKDIR, SLURM_ACCOUNT, etc.)
-if [[ -f "slurm-config.sh" ]]; then
-    source slurm-config.sh 2>/dev/null || echo "Warning: Sourcing slurm-config.sh had unexpected output."
-else
-    echo "Warning: slurm-config.sh not found. Set JOB_WORKDIR manually if needed."
-fi
-
 # Ensure JOB_WORKDIR is set (fallback to current dir)
 if [[ -z "${JOB_WORKDIR:-}" ]]; then
     echo "Note: JOB_WORKDIR not set. Using current dir for analysis."
