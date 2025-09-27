@@ -3,6 +3,7 @@
 *.log
 runme.sh
 work
+.specstory/
 tmp/
 output/
 202104/
